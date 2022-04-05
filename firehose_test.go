@@ -2,14 +2,19 @@ package firehose
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
-func (s *ConsumerTestSuite) TestProcessMessage() {
-	assert.Equal(2, 1 + 1)
+type ExampleTestSuite struct {
+	suite.Suite
+}
+
+func (s *ExampleTestSuite) TestExample() {
+	assert.Equal(s.T(), 2, 1+1)
+}
+
+func TestExampleTestSuite(t *testing.T) {
+	suite.Run(t, new(ExampleTestSuite))
 }
