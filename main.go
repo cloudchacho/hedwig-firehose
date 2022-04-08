@@ -1,5 +1,9 @@
 package main
 
+import (
+	"fmt"
+)
+
 // FirehoseBackend is used for consuming messages from a transport and read/write to storage
 type FirehoseBackend interface {
 }
@@ -31,4 +35,8 @@ func NewFirehose(FirehoseBackend FirehoseBackend) *Firehose {
 			firehoseBackend: FirehoseBackend,
 		}}
 	return f
+}
+
+func main() {
+	fmt.Println("Hello World")
 }
