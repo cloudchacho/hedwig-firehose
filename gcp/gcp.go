@@ -56,16 +56,12 @@ func (b *Backend) initDefaults() {
 	if b.settings.PubsubClientOptions == nil {
 		b.settings.PubsubClientOptions = []option.ClientOption{}
 	}
-	if b.getLogger == nil {
-		stdLogger := &hedwig.StdLogger{}
-		b.getLogger = func(_ context.Context) hedwig.Logger { return stdLogger }
-	}
 }
 
 // NewBackend creates a Firehose on GCP
 // The provider metadata produced by this Backend will have concrete type: gcp.Metadata
-func NewBackend(settings Settings, getLogger hedwig.GetLoggerFunc) *Backend {
-	b := &Backend{settings: settings, getLogger: getLogger}
+func NewBackend(settings Settings) *Backend {
+	b := &Backend{settings: settings}
 	b.initDefaults()
 	return b
 }
