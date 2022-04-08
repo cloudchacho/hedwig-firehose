@@ -7,10 +7,9 @@ import (
 
 // This should satify interface for FirehoseBackend
 type Backend struct {
-	client    *pubsub.Client
-	settings  Settings
+	client   *pubsub.Client
+	settings Settings
 }
-
 
 // SubscriptionProject represents a tuple of subscription name and project for cross-project Google subscriptions
 type SubscriptionProject struct {
