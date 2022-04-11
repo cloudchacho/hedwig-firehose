@@ -30,13 +30,6 @@ type Settings struct {
 
 	// final bucket for firehose files
 	OutputBucket string
-
-	// interval when leader moves files to final bucket
-	ScrapeInterval int
-
-	// interval when follower flushes to staging bucket
-	FlushAfter int
-
 	// Firehose queue name, for requeueing
 	QueueName string
 

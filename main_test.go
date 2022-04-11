@@ -21,5 +21,6 @@ func TestExampleTestSuite(t *testing.T) {
 
 func TestNewFirehose(t *testing.T) {
 	var s struct{}
-	NewFirehose(s)
+	var s2 ProcessSettings
+	NewFirehose(s, s2)
 }
