@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudchacho/hedwig-go/gcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -51,6 +52,7 @@ func (b *FirehoseBackendMock) ReadFile(ctx context.Context, readBucket string, r
 
 func TestNewFirehose(t *testing.T) {
 	s := new(FirehoseBackendMock)
-	var s2 ProcessSettings
-	NewFirehose(s, s2)
+	var s3 ProcessSettings
+	var s2 gcp.Settings
+	NewFirehose(s, s2, s3)
 }

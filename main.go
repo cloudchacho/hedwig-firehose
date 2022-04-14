@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
+
+	"github.com/cloudchacho/hedwig-go"
+	"github.com/cloudchacho/hedwig-go/gcp"
+	"github.com/cloudchacho/hedwig-go/protobuf"
+	"google.golang.org/protobuf/proto"
 )
 
 type ProcessSettings struct {
@@ -21,18 +25,8 @@ type ReceivedMessage struct {
 	ProviderMetadata interface{}
 }
 
-// FirehoseBackend is used for consuming messages from a transport and read/write to storage
+// FirehoseBackend is used for read/write to storage
 type FirehoseBackend interface {
-	Receive(ctx context.Context, numMessages uint32, visibilityTimeout time.Duration, messageCh chan<- ReceivedMessage) error
-
-	// NackMessage nacks a message on the queue
-	NackMessage(ctx context.Context, providerMetadata interface{}) error
-
-	// AckMessage acknowledges a message on the queue
-	AckMessage(ctx context.Context, providerMetadata interface{}) error
-
-	// RequeueFirehoseDLQ re-queues everything in the firehose queue
-	RequeueFirehoseDLQ(ctx context.Context, numMessages uint32, visibilityTimeout time.Duration) error
 	UploadFile(ctx context.Context, data []byte, uploadBucket string, uploadLocation string) error
 
 	ReadFile(ctx context.Context, readBucket string, readLocation string) ([]byte, error)
@@ -41,6 +35,10 @@ type FirehoseBackend interface {
 type Firehose struct {
 	processSettings ProcessSettings
 	firehoseBackend FirehoseBackend
+	hedwigConsumer *hedwig.QueueConsumer
+}
+
+func (fp *Firehose) WriteMessages() {
 }
 
 func (fp *Firehose) RunFollower() {
@@ -56,13 +54,29 @@ func (f *Firehose) RunFirehose() {
 	// 3. else follower call RunFollower
 }
 
-func NewFirehose(firehoseBackend FirehoseBackend, processSettings ProcessSettings) *Firehose {
+func NewFirehose(firehoseBackend FirehoseBackend, consumerSettings gcp.Settings, processSettings ProcessSettings) (*Firehose, error) {
 	// If we want to inject config from env, pass in when creating new
+
+	// TODO: add logger here
+	getLoggerFunc := func(_ context.Context) hedwig.Logger {
+		return nil
+	}
+	backend := gcp.NewBackend(consumerSettings, getLoggerFunc)
+	// TODO: add from schema generation here
+	encoder, err := protobuf.NewMessageEncoderDecoder([]proto.Message{})
+	if err != nil {
+		return nil, err
+	}
+	// TODO: register same callback with all message to basically write to memory until flush
+	registry := hedwig.CallbackRegistry {}
+
+	hedwigConsumer := hedwig.NewQueueConsumer(backend, encoder, getLoggerFunc, registry)
 	f := &Firehose{
 		processSettings: processSettings,
 		firehoseBackend: firehoseBackend,
+		hedwigConsumer:  hedwigConsumer,
 	}
-	return f
+	return f, nil
 }
 
 func main() {

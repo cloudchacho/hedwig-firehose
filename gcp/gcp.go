@@ -10,13 +10,12 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-go"
-	"github.com/cloudchacho/hedwig-go/gcp"
 )
 
 // This should satify interface for FirehoseBackend
 type Backend struct {
-	*gcp.Backend
-	firehoseSettings FirehoseSettings
+	GcsClient *storage.Client
+	FirehoseSettings FirehoseSettings
 }
 
 // Settings for Hedwig firehose
@@ -29,33 +28,19 @@ type FirehoseSettings struct {
 
 	// final bucket for firehose files
 	OutputBucket string
-
-	// Firehose queue name, for requeueing
-	FirehoseQueueName string
-}
-
-// TODO: add when implementing requeue and processing DLQ logijc
-func (b *Backend) RequeueFirehoseDLQ(ctx context.Context, numMessages uint32, visibilityTimeout time.Duration) error {
-	return nil
 }
 
 func (b *Backend) UploadFile(ctx context.Context, data []byte, uploadBucket string, uploadLocation string) error {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return fmt.Errorf("storage.NewClient: %v", err)
-	}
-	defer client.Close()
-
 	buf := bytes.NewBuffer(data)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*50)
 	defer cancel()
 
 	// Upload an object with storage.Writer.
-	wc := client.Bucket(uploadBucket).Object(uploadLocation).NewWriter(ctx)
+	wc := b.GcsClient.Bucket(uploadBucket).Object(uploadLocation).NewWriter(ctx)
 	wc.ChunkSize = 0
 
-	if _, err = io.Copy(wc, buf); err != nil {
+	if _, err := io.Copy(wc, buf); err != nil {
 		return fmt.Errorf("io.Copy: %v", err)
 	}
 	// Data can continue to be added to the file until the writer is closed.
@@ -67,16 +52,10 @@ func (b *Backend) UploadFile(ctx context.Context, data []byte, uploadBucket stri
 }
 
 func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation string) ([]byte, error) {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storage.NewClient: %v", err)
-	}
-	defer client.Close()
-
 	ctx, cancel := context.WithTimeout(ctx, time.Second*50)
 	defer cancel()
 
-	rc, err := client.Bucket(readBucket).Object(readLocation).NewReader(ctx)
+	rc, err := b.GcsClient.Bucket(readBucket).Object(readLocation).NewReader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Object(%q).NewReader: %v", readLocation, err)
 	}
@@ -91,9 +70,9 @@ func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation 
 
 // NewBackend creates a Firehose on GCP
 // The provider metadata produced by this Backend will have concrete type: gcp.Metadata
-func NewBackend(firehoseSettings FirehoseSettings, hedwigSettings gcp.Settings, getLogger hedwig.GetLoggerFunc) *Backend {
+func NewBackend(firehoseSettings FirehoseSettings, client *storage.Client, getLogger hedwig.GetLoggerFunc) *Backend {
 	b := &Backend{
-		gcp.NewBackend(hedwigSettings, getLogger),
+		client,
 		firehoseSettings,
 	}
 	return b
