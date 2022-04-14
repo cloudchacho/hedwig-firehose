@@ -35,7 +35,7 @@ type FirehoseBackend interface {
 type Firehose struct {
 	processSettings ProcessSettings
 	firehoseBackend FirehoseBackend
-	hedwigConsumer *hedwig.QueueConsumer
+	hedwigConsumer  *hedwig.QueueConsumer
 }
 
 func (fp *Firehose) WriteMessages() {
@@ -68,7 +68,7 @@ func NewFirehose(firehoseBackend FirehoseBackend, consumerSettings gcp.Settings,
 		return nil, err
 	}
 	// TODO: register same callback with all message to basically write to memory until flush
-	registry := hedwig.CallbackRegistry {}
+	registry := hedwig.CallbackRegistry{}
 
 	hedwigConsumer := hedwig.NewQueueConsumer(backend, encoder, getLoggerFunc, registry)
 	f := &Firehose{

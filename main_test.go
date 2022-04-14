@@ -54,5 +54,7 @@ func TestNewFirehose(t *testing.T) {
 	s := new(FirehoseBackendMock)
 	var s3 ProcessSettings
 	var s2 gcp.Settings
-	NewFirehose(s, s2, s3)
+	f, err := NewFirehose(s, s2, s3)
+	assert.Equal(t, nil, err)
+	assert.NotNil(t, f)
 }

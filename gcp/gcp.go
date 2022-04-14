@@ -14,7 +14,7 @@ import (
 
 // This should satify interface for FirehoseBackend
 type Backend struct {
-	GcsClient *storage.Client
+	GcsClient        *storage.Client
 	FirehoseSettings FirehoseSettings
 }
 
