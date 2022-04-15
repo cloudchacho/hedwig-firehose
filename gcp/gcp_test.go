@@ -15,7 +15,7 @@ type GcpTestSuite struct {
 	suite.Suite
 	client         *storage.Client
 	server         *fakestorage.Server
-	sampleSettings gcp.FirehoseSettings
+	sampleSettings gcp.Settings
 }
 
 func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
@@ -29,7 +29,7 @@ func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
 		},
 	})
 	s.client = s.server.Client()
-	s.sampleSettings = gcp.FirehoseSettings{
+	s.sampleSettings = gcp.Settings{
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
 		OutputBucket:   "some-output-bucket",
@@ -42,8 +42,8 @@ func (s *GcpTestSuite) AfterTest(suiteName, testName string) {
 
 func (s *GcpTestSuite) TestRead() {
 	b := gcp.Backend{
-		GcsClient:        s.client,
-		FirehoseSettings: s.sampleSettings,
+		GcsClient: s.client,
+		Settings:  s.sampleSettings,
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/file.txt")
 	assert.Equal(s.T(), nil, err)
@@ -52,8 +52,8 @@ func (s *GcpTestSuite) TestRead() {
 
 func (s *GcpTestSuite) TestUpload() {
 	b := gcp.Backend{
-		GcsClient:        s.client,
-		FirehoseSettings: s.sampleSettings,
+		GcsClient: s.client,
+		Settings:  s.sampleSettings,
 	}
 	err := b.UploadFile(context.Background(), []byte("test"), "some-bucket", "some/object/test.txt")
 	assert.Equal(s.T(), nil, err)

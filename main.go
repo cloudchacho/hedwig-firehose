@@ -25,8 +25,8 @@ type ReceivedMessage struct {
 	ProviderMetadata interface{}
 }
 
-// FirehoseBackend is used for read/write to storage
-type FirehoseBackend interface {
+// StorageBackend is used for read/write to storage
+type StorageBackend interface {
 	UploadFile(ctx context.Context, data []byte, uploadBucket string, uploadLocation string) error
 
 	ReadFile(ctx context.Context, readBucket string, readLocation string) ([]byte, error)
@@ -34,7 +34,7 @@ type FirehoseBackend interface {
 
 type Firehose struct {
 	processSettings ProcessSettings
-	firehoseBackend FirehoseBackend
+	storageBackend  StorageBackend
 	hedwigConsumer  *hedwig.QueueConsumer
 }
 
@@ -54,7 +54,7 @@ func (f *Firehose) RunFirehose() {
 	// 3. else follower call RunFollower
 }
 
-func NewFirehose(firehoseBackend FirehoseBackend, consumerSettings gcp.Settings, processSettings ProcessSettings) (*Firehose, error) {
+func NewFirehose(storageBackend StorageBackend, consumerSettings gcp.Settings, processSettings ProcessSettings) (*Firehose, error) {
 	// If we want to inject config from env, pass in when creating new
 
 	// TODO: add logger here
@@ -73,7 +73,7 @@ func NewFirehose(firehoseBackend FirehoseBackend, consumerSettings gcp.Settings,
 	hedwigConsumer := hedwig.NewQueueConsumer(backend, encoder, getLoggerFunc, registry)
 	f := &Firehose{
 		processSettings: processSettings,
-		firehoseBackend: firehoseBackend,
+		storageBackend:  storageBackend,
 		hedwigConsumer:  hedwigConsumer,
 	}
 	return f, nil

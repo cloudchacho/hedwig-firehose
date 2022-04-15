@@ -14,12 +14,12 @@ import (
 
 // This should satify interface for FirehoseBackend
 type Backend struct {
-	GcsClient        *storage.Client
-	FirehoseSettings FirehoseSettings
+	GcsClient *storage.Client
+	Settings  Settings
 }
 
 // Settings for Hedwig firehose
-type FirehoseSettings struct {
+type Settings struct {
 	// bucket where leader file is saved
 	MetadataBucket string
 
@@ -43,7 +43,7 @@ func (b *Backend) UploadFile(ctx context.Context, data []byte, uploadBucket stri
 	if _, err := io.Copy(wc, buf); err != nil {
 		return fmt.Errorf("io.Copy: %v", err)
 	}
-	// Data can continue to be added to the file until the writer is closed.
+
 	if err := wc.Close(); err != nil {
 		return fmt.Errorf("Writer.Close: %v", err)
 	}
@@ -70,10 +70,10 @@ func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation 
 
 // NewBackend creates a Firehose on GCP
 // The provider metadata produced by this Backend will have concrete type: gcp.Metadata
-func NewBackend(firehoseSettings FirehoseSettings, client *storage.Client, getLogger hedwig.GetLoggerFunc) *Backend {
+func NewBackend(settings Settings, client *storage.Client, getLogger hedwig.GetLoggerFunc) *Backend {
 	b := &Backend{
 		client,
-		firehoseSettings,
+		settings,
 	}
 	return b
 }
