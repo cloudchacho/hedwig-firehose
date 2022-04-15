@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/cloudchacho/hedwig-go"
 )
 
 // This should satify interface for FirehoseBackend
@@ -70,7 +69,7 @@ func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation 
 
 // NewBackend creates a Firehose on GCP
 // The provider metadata produced by this Backend will have concrete type: gcp.Metadata
-func NewBackend(settings Settings, client *storage.Client, getLogger hedwig.GetLoggerFunc) *Backend {
+func NewBackend(settings Settings, client *storage.Client) *Backend {
 	b := &Backend{
 		client,
 		settings,

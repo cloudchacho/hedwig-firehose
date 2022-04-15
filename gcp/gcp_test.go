@@ -73,6 +73,20 @@ func (s *GcpTestSuite) TestUpload() {
 	assert.Equal(s.T(), []byte("test"), res)
 }
 
+func (s *GcpTestSuite) TestUploadNotValidLocation() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+		Settings:  s.sampleSettings,
+	}
+	err := b.UploadFile(context.Background(), []byte("test"), "nonexistent-bucket", "some/object/test.txt")
+	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestNewBackend() {
+	res := gcp.NewBackend(s.sampleSettings, s.client)
+	assert.NotNil(s.T(), res)
+}
+
 func TestGcpTestSuite(t *testing.T) {
 	suite.Run(t, new(GcpTestSuite))
 }
