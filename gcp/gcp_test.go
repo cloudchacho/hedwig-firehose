@@ -57,7 +57,7 @@ func (s *GcpTestSuite) TestReadNotValidLocation() {
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/notthere.txt")
 	assert.NotNil(s.T(), err)
-	assert.Equal(s.T(), []byte(""), res)
+	assert.Nil(s.T(), res)
 }
 
 func (s *GcpTestSuite) TestUpload() {
