@@ -50,6 +50,16 @@ func (s *GcpTestSuite) TestRead() {
 	assert.Equal(s.T(), []byte("inside the file"), res)
 }
 
+func (s *GcpTestSuite) TestReadNotValidLocation() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+		Settings:  s.sampleSettings,
+	}
+	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/notthere.txt")
+	assert.NotNil(s.T(), err)
+	assert.Equal(s.T(), []byte(""), res)
+}
+
 func (s *GcpTestSuite) TestUpload() {
 	b := gcp.Backend{
 		GcsClient: s.client,
