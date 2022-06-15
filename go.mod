@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	cloud.google.com/go/storage v1.22.0
-	github.com/cloudchacho/hedwig-go v0.10.0
+	github.com/cloudchacho/hedwig-go v0.11.0
 	github.com/stretchr/testify v1.7.1
 )
 

@@ -82,6 +82,8 @@ github.com/cloudchacho/hedwig-go v0.9.0 h1:+BeD2B+l0LnlgbBfl9VTNtKDH/jzhMtAv2DDK
 github.com/cloudchacho/hedwig-go v0.9.0/go.mod h1:M26n4pYqsfEd9e/oHVughSULfcfyeXJepH6B0+qjw2A=
 github.com/cloudchacho/hedwig-go v0.10.0 h1:H76+Lc0x6ee//K3NQC6f9mwH7mS4w0jWFSOQ95jxMYo=
 github.com/cloudchacho/hedwig-go v0.10.0/go.mod h1:vrJNy+9FMVw0NL9t3vrfXIugjfeiDb8LYo4Td1LkR8s=
+github.com/cloudchacho/hedwig-go v0.11.0 h1:QHoiSuAyRzZ6YppUf5aTO+nI6PXimjMOqdC/Wna/fxs=
+github.com/cloudchacho/hedwig-go v0.11.0/go.mod h1:vrJNy+9FMVw0NL9t3vrfXIugjfeiDb8LYo4Td1LkR8s=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
 github.com/cncf/udpa/go v0.0.0-20200629203442-efcf912fb354/go.mod h1:WmhPx2Nbnhtbo57+VJT5O0JRkEi1Wbu0z5j0R8u5Hbk=
 github.com/cncf/udpa/go v0.0.0-20201120205902-5459f2c99403/go.mod h1:WmhPx2Nbnhtbo57+VJT5O0JRkEi1Wbu0z5j0R8u5Hbk=
