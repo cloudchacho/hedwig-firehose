@@ -1,0 +1,15 @@
+syntax = "proto2";
+
+package main;
+
+import "hedwig/protobuf/options.proto";
+
+option go_package = "github.com/cloudchacho/hedwig-firehose/example;main";
+
+message UserCreatedV1 {
+  option (hedwig.message_options).major_version = 1;
+  option (hedwig.message_options).minor_version = 0;
+  option (hedwig.message_options).message_type = "user-created";
+
+  required string user_id = 1;
+}
