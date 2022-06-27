@@ -29,9 +29,13 @@ type Settings struct {
 	OutputBucket string
 }
 
-func (b *Backend) CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.Writer, error) {
+func (b *Backend) CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.WriteCloser, error) {
 	wc := b.GcsClient.Bucket(uploadBucket).Object(uploadLocation).NewWriter(ctx)
 	return wc, nil
+}
+
+func (b *Backend) CreateReader(ctx context.Context, uploadBucket string, uploadLocation string) (io.ReadCloser, error) {
+	return b.GcsClient.Bucket(uploadBucket).Object(uploadLocation).NewReader(ctx)
 }
 
 func (b *Backend) UploadFile(ctx context.Context, data []byte, uploadBucket string, uploadLocation string) error {
