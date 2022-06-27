@@ -164,10 +164,10 @@ func (f *Firehose) RunFirehose() {
 	// 3. else follower call RunFollower
 }
 
-func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoder hedwig.Encoder, decoder hedwig.Decoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
+func NewFirehose(consumerBackend hedwig.ConsumerBackend, storageEncoder hedwig.Encoder, pubsubDecoder hedwig.Decoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
 	registry := hedwig.CallbackRegistry{}
 
-	hedwigFirehose := hedwig.NewFirehose(encoder, decoder)
+	hedwigFirehose := hedwig.NewFirehose(storageEncoder, pubsubDecoder)
 	f := &Firehose{
 		processSettings:       processSettings,
 		storageBackendCreator: storageBackendCreator,
@@ -181,7 +181,7 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoder hedwig.Encoder,
 		registry[msgTypeVer] = f.handleMessage
 	}
 	fmt.Println(registry)
-	hedwigConsumer := hedwig.NewQueueConsumer(consumerBackend, decoder, logger, registry)
+	hedwigConsumer := hedwig.NewQueueConsumer(consumerBackend, pubsubDecoder, logger, registry)
 	f.hedwigConsumer = hedwigConsumer
 	return f, nil
 }

@@ -1,23 +1,23 @@
 package main
 
 import (
-	"fmt"
 	"context"
+	"fmt"
+	"regexp"
 	"testing"
 	"time"
-	"regexp"
 
+	"github.com/Masterminds/semver"
 	firehoseGcp "github.com/cloudchacho/hedwig-firehose/gcp"
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
 	"github.com/cloudchacho/hedwig-go/protobuf"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 	"github.com/stretchr/testify/mock"
-	"github.com/Masterminds/semver"
-	"github.com/pkg/errors"
-
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
@@ -43,76 +43,110 @@ type GcpTestSuite struct {
 	pubSubClient   *pubsub.Client
 }
 
-
 type firehoseConsumerDecoder struct {
+	*protobuf.EncoderDecoder
 }
 
-// DecodeMessageType decodes message type from meta attributes
-func (fcd *firehoseConsumerDecoder) DecodeMessageType(schema string) (string, *semver.Version, error) {
-	m := schemaRegex.FindStringSubmatch(schema)
-	if len(m) == 0 {
-		return "", nil, errors.Errorf("invalid schema: '%s' doesn't match valid regex", schema)
-	}
-
-	versionStr := fmt.Sprintf("%s.%s", m[2], m[3])
-	version, err := semver.NewVersion(versionStr)
-	if err != nil {
-		// would never happen
-		return "", nil, errors.Errorf("unable to parse as version: %s", versionStr)
-	}
-	return m[1], version, nil
-}
-
-// ExtractData extracts data from the on-the-wire payload
-// Type of data will be *anypb.Any
-func (fcd *firehoseConsumerDecoder) ExtractData(messagePayload []byte, attributes map[string]string) (hedwig.MetaAttributes, interface{}, error) {
-	metaAttrs := hedwig.MetaAttributes{}
-	payload := protobuf.PayloadV1{}
-	err := proto.Unmarshal(messagePayload, &payload)
-	if err != nil {
-		return metaAttrs, nil, errors.Wrap(err, "Unexpected data couldn't be unmarshaled")
-	}
-	fmt.Println(payload.FormatVersion)
-	formatVersion, err := semver.NewVersion(payload.FormatVersion)
-	if err != nil {
-		return metaAttrs, nil, errors.Wrap(err, "Unexpected data: invalid format version")
-	}
-
-	metaAttrs.Timestamp = payload.Metadata.Timestamp.AsTime()
-	metaAttrs.Publisher = payload.Metadata.Publisher
-	metaAttrs.Headers = payload.Metadata.Headers
-	metaAttrs.ID = payload.Id
-	metaAttrs.Schema = payload.Schema
-	metaAttrs.FormatVersion = formatVersion
-
-	return metaAttrs, payload.Data, nil
-}
+//
+//// DecodeMessageType decodes message type from meta attributes
+//func (fcd *firehoseConsumerDecoder) DecodeMessageType(schema string) (string, *semver.Version, error) {
+//	m := schemaRegex.FindStringSubmatch(schema)
+//	if len(m) == 0 {
+//		return "", nil, errors.Errorf("invalid schema: '%s' doesn't match valid regex", schema)
+//	}
+//
+//	versionStr := fmt.Sprintf("%s.%s", m[2], m[3])
+//	version, err := semver.NewVersion(versionStr)
+//	if err != nil {
+//		// would never happen
+//		return "", nil, errors.Errorf("unable to parse as version: %s", versionStr)
+//	}
+//	return m[1], version, nil
+//}
+//
+//// ExtractData extracts data from the on-the-wire payload
+//// Type of data will be *anypb.Any
+//func (fcd *firehoseConsumerDecoder) ExtractData(messagePayload []byte, attributes map[string]string) (hedwig.MetaAttributes, interface{}, error) {
+//	userCreatedPayload := UserCreatedV1{}
+//	err := proto.Unmarshal(messagePayload, &userCreatedPayload)
+//	if err != nil {
+//		panic(err)
+//	}
+//	fmt.Println("typeurl", *userCreatedPayload.UserId)
+//	metaAttrs := hedwig.MetaAttributes{}
+//	payload := protobuf.PayloadV1{}
+//	err = proto.Unmarshal(messagePayload, &payload)
+//	if err != nil {
+//		return metaAttrs, nil, errors.Wrap(err, "Unexpected data couldn't be unmarshaled")
+//	}
+//	fmt.Println("typeurl", payload.Data.TypeUrl)
+//	fmt.Println("hi", payload.FormatVersion)
+//	formatVersion, err := semver.NewVersion(payload.FormatVersion)
+//	if err != nil {
+//		return metaAttrs, nil, errors.Wrap(err, "Unexpected data: invalid format version")
+//	}
+//
+//	metaAttrs.Timestamp = payload.Metadata.Timestamp.AsTime()
+//	metaAttrs.Publisher = payload.Metadata.Publisher
+//	metaAttrs.Headers = payload.Metadata.Headers
+//	metaAttrs.ID = payload.Id
+//	metaAttrs.Schema = payload.Schema
+//	metaAttrs.FormatVersion = formatVersion
+//
+//	return metaAttrs, payload.Data, nil
+//}
 
 func (fcd *firehoseConsumerDecoder) DecodeData(messageType string, version *semver.Version, data interface{}) (interface{}, error) {
 	return data, nil
 }
 
+type firehoseStorageEncoder struct {
+}
+
 // EncodeData encodes the message with appropriate format for transport over the wire
 // Type of data must be proto.Message
-func (fcd *firehoseConsumerDecoder) EncodeData(data interface{}, useMessageTransport bool, metaAttrs hedwig.MetaAttributes) ([]byte, error) {
-	return data.([]byte), nil
+func (fcd *firehoseStorageEncoder) EncodeData(data interface{}, useMessageTransport bool, metaAttrs hedwig.MetaAttributes) ([]byte, error) {
+	if useMessageTransport {
+		panic("invalid input")
+	}
+	const urlPrefix = "type.googleapis.com/"
+	dst := anypb.Any{}
+	// TODO take this as an input to struct
+	dst.TypeUrl = urlPrefix + string("standardbase.hedwig.UserCreatedV1")
+	dst.Value = data.([]byte)
+	container := &protobuf.PayloadV1{
+		FormatVersion: fmt.Sprintf("%d.%d", metaAttrs.FormatVersion.Major(), metaAttrs.FormatVersion.Minor()),
+		Id:            metaAttrs.ID,
+		Metadata: &protobuf.MetadataV1{
+			Publisher: metaAttrs.Publisher,
+			Timestamp: timestamppb.New(metaAttrs.Timestamp),
+			Headers:   metaAttrs.Headers,
+		},
+		Schema: metaAttrs.Schema,
+		Data:   &dst,
+	}
+	payload, err := proto.Marshal(container)
+	if err != nil {
+		// Unable to convert to bytes
+		return nil, err
+	}
+	return payload, nil
 }
 
 // VerifyKnownMinorVersion checks that message version is known to us
-func (fcd *firehoseConsumerDecoder) VerifyKnownMinorVersion(messageType string, version *semver.Version) error {
+func (fcd *firehoseStorageEncoder) VerifyKnownMinorVersion(messageType string, version *semver.Version) error {
 	// no minor verification
 	return nil
 }
 
 // EncodeMessageType encodes the message type with appropriate format for transport over the wire
-func (fcd *firehoseConsumerDecoder) EncodeMessageType(messageType string, version *semver.Version) string {
+func (fcd *firehoseStorageEncoder) EncodeMessageType(messageType string, version *semver.Version) string {
 	return fmt.Sprintf("%s/%d.%d", messageType, version.Major(), version.Minor())
 }
 
-func (fcd *firehoseConsumerDecoder) IsBinary() bool {
+func (fcd *firehoseStorageEncoder) IsBinary() bool {
 	return true
 }
-
 
 // type Decoder interface {
 // 	// DecodeData validates and decodes data
@@ -140,7 +174,6 @@ func (fcd *firehoseConsumerDecoder) IsBinary() bool {
 // 	IsBinary() bool
 // }
 
-
 func (s *GcpTestSuite) SetupSuite() {
 	s.TearDownSuite()
 	ctx := context.Background()
@@ -149,7 +182,7 @@ func (s *GcpTestSuite) SetupSuite() {
 		s.Require().NoError(err)
 		s.pubSubClient = client
 	}
-		dlqTopic, err := s.pubSubClient.CreateTopic(ctx, "hedwig-dev-myapp-dlq")
+	dlqTopic, err := s.pubSubClient.CreateTopic(ctx, "hedwig-dev-myapp-dlq")
 	s.Require().NoError(err)
 	_, err = s.pubSubClient.CreateSubscription(ctx, "hedwig-dev-myapp-dlq", pubsub.SubscriptionConfig{
 		Topic:       dlqTopic,
@@ -262,7 +295,7 @@ func (s *GcpTestSuite) TestNewFirehose() {
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(firehoseGcp.Settings{}, &storage.Client{})
 	encoderdecoder, _ := protobuf.NewMessageEncoderDecoder([]proto.Message{})
-	f, err := NewFirehose(backend, encoderdecoder, encoderdecoder, msgList, storageBackend, s2, s3, hedwigLogger)
+	f, err := NewFirehose(backend, encoderdecoder, encoderdecoder, encoderdecoder, msgList, storageBackend, s2, s3, hedwigLogger)
 	assert.Equal(s.T(), nil, err)
 	assert.NotNil(s.T(), f)
 }
@@ -284,9 +317,9 @@ func (s *GcpTestSuite) TestFirehoseIntegration() {
 	s3.FlushAfter = 2
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(firehoseGcp.Settings{}, &storage.Client{})
-	// encoderdecoder, _ := protobuf.NewMessageEncoderDecoder([]proto.Message{})
+	storageEncoder := firehoseStorageEncoder{}
 	decoder := firehoseConsumerDecoder{}
-	f, err := NewFirehose(backend, &decoder, &decoder, msgList, storageBackend, s2, s3, hedwigLogger)
+	f, err := NewFirehose(backend, &storageEncoder, &decoder, msgList, storageBackend, s2, s3, hedwigLogger)
 
 	routing := map[hedwig.MessageTypeMajorVersion]string{
 		{
@@ -330,7 +363,6 @@ func (s *GcpTestSuite) TestFirehoseIntegration() {
 		}
 	}
 
-
 	// other stuff I may need
 	// ctx2, cancel2 := context.WithCancel(ctx)
 	// err = s.client.Subscription("hedwig-dev-myapp-dev-user-created-v1").Receive(ctx2, func(_ context.Context, message *pubsub.Message) {
@@ -350,7 +382,6 @@ func (s *GcpTestSuite) TestFirehoseIntegration() {
 	// 	s.Require().NoError(err)
 	// })
 }
-
 
 // func (s *GcpTestSuite) TestPublish() {
 // 	var hedwigLogger hedwig.Logger
