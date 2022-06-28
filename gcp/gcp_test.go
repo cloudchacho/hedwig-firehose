@@ -3,7 +3,9 @@ package gcp_test
 import (
 	"context"
 	"testing"
+	"fmt"
 
+	"google.golang.org/api/iterator"
 	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-firehose/gcp"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
@@ -60,6 +62,35 @@ func (s *GcpTestSuite) TestReadNotValidLocation() {
 	assert.Nil(s.T(), res)
 }
 
+func (s *GcpTestSuite) TestUploadWriter() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+		Settings:  s.sampleSettings,
+	}
+	wr, err := b.CreateWriter(context.Background(), "some-bucket", "some/object/test.txt")
+	assert.Equal(s.T(), nil, err)
+	_, err = wr.Write([]byte("test data"))
+	assert.Equal(s.T(), nil, err)
+	err = wr.Close()
+	assert.Equal(s.T(), nil, err)
+
+	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
+	it := s.client.Bucket("some-bucket").Objects(context.Background(), nil)
+        for {
+                attrs, err := it.Next()
+                if err == iterator.Done {
+                        break
+                }
+                if err != nil {
+			fmt.Println("problem next", err)
+                }
+                fmt.Println(attrs.Name)
+        }
+	fmt.Println("objs in gcs err ", err)
+	assert.Equal(s.T(), nil, err)
+	assert.Equal(s.T(), []byte("test data"), res)
+}
+
 func (s *GcpTestSuite) TestUpload() {
 	b := gcp.Backend{
 		GcsClient: s.client,
@@ -69,6 +100,18 @@ func (s *GcpTestSuite) TestUpload() {
 	assert.Equal(s.T(), nil, err)
 
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
+	it := s.client.Bucket("some-bucket").Objects(context.Background(), nil)
+        for {
+                attrs, err := it.Next()
+                if err == iterator.Done {
+                        break
+                }
+                if err != nil {
+			fmt.Println("problem next", err)
+                }
+                fmt.Println(attrs.Name)
+        }
+	fmt.Println("objs in gcs err ", err)
 	assert.Equal(s.T(), nil, err)
 	assert.Equal(s.T(), []byte("test"), res)
 }

@@ -48,6 +48,7 @@ type ReceivedMessage struct {
 type StorageBackendCreator interface {
 	CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.WriteCloser, error)
 	CreateReader(ctx context.Context, uploadBucket string, uploadLocation string) (io.ReadCloser, error)
+	UploadFile(ctx context.Context, data []byte, uploadBucket string, uploadLocation string) error
 }
 
 type Firehose struct {
@@ -78,7 +79,9 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			fmt.Println(fp.messageCh)
 			// close all writers and associated errChannels
 			for key, writer := range writerMapping {
+				fmt.Println("closing", key, writer)
 				err := writer.Close()
+				fmt.Println("close err", err)
 				errChannels := errChannelMapping[key]
 				if err != nil {
 					for _, errCh := range errChannels {
@@ -108,19 +111,27 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			if _, ok := writerMapping[key]; !ok {
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
 				writer, err := fp.storageBackendCreator.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
+				fmt.Println("staging bucket: ", fp.processSettings.StagingBucket)
+				fmt.Println("writer create err", err)
 				if err != nil {
 					errCh <- err
 					continue
 				}
 				writerMapping[key] = writer
 			}
-			msgTypeWriter := writerMapping[key]
+			msgTypeWriter, ok := writerMapping[key]
+			fmt.Println("writer ok: ", ok)
 			payload, err := fp.hedwigFirehose.Serialize(message)
 			if err != nil {
 				errCh <- err
 				continue
 			}
 			_, err = msgTypeWriter.Write(payload)
+			// buf := bytes.NewBuffer(payload)
+			// _, err = io.Copy(msgTypeWriter, buf)
+			// err = fp.storageBackendCreator.UploadFile(ctx, payload, fp.processSettings.StagingBucket, uploadLocation)
+			fmt.Println("payload", payload)
+			fmt.Println("writing err", err)
 			if err != nil {
 				errCh <- err
 				continue
@@ -164,10 +175,10 @@ func (f *Firehose) RunFirehose() {
 	// 3. else follower call RunFollower
 }
 
-func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoder hedwig.Encoder, decoder hedwig.Decoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
+func NewFirehose(consumerBackend hedwig.ConsumerBackend, storageEncoder hedwig.Encoder, pubsubDecoder hedwig.Decoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
 	registry := hedwig.CallbackRegistry{}
 
-	hedwigFirehose := hedwig.NewFirehose(encoder, decoder)
+	hedwigFirehose := hedwig.NewFirehose(storageEncoder, pubsubDecoder)
 	f := &Firehose{
 		processSettings:       processSettings,
 		storageBackendCreator: storageBackendCreator,
@@ -181,7 +192,7 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoder hedwig.Encoder,
 		registry[msgTypeVer] = f.handleMessage
 	}
 	fmt.Println(registry)
-	hedwigConsumer := hedwig.NewQueueConsumer(consumerBackend, decoder, logger, registry)
+	hedwigConsumer := hedwig.NewQueueConsumer(consumerBackend, pubsubDecoder, logger, registry)
 	f.hedwigConsumer = hedwigConsumer
 	return f, nil
 }
