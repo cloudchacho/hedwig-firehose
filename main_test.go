@@ -149,7 +149,7 @@ func (s *GcpTestSuite) TestNewFirehose() {
 	var hedwigLogger hedwig.Logger
 	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
 	msgList := []hedwig.MessageTypeMajorVersion{{
-		MessageType: "user-created",
+		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
 	var s3 ProcessSettings
@@ -166,7 +166,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
 	// maybe just user-created?
 	msgList := []hedwig.MessageTypeMajorVersion{{
-		MessageType: "user-created",
+		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
 	s3 := ProcessSettings{
@@ -177,8 +177,11 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	}
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(s.storageClient)
-	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, s2, s3, hedwigLogger)
+	msgTypeUrls := map[hedwig.MessageTypeMajorVersion]string{
+		{MessageType: "user-created", MajorVersion: 1}: "type.googleapis.com/standardbase.hedwig.UserCreatedV1",
+	}
+	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
+	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 
 	routing := map[hedwig.MessageTypeMajorVersion]string{

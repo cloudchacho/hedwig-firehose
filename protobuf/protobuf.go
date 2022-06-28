@@ -14,6 +14,7 @@ import (
 
 type FirehoseEncoderDecoder struct {
 	*hedwigProtobuf.EncoderDecoder
+	typeUrls map[hedwig.MessageTypeMajorVersion]string
 }
 
 func (fcd *FirehoseEncoderDecoder) DecodeData(messageType string, version *semver.Version, data interface{}) (interface{}, error) {
@@ -26,11 +27,13 @@ func (fcd *FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTransp
 	if useMessageTransport {
 		panic("invalid input")
 	}
-	const urlPrefix = "type.googleapis.com/"
 	dst := anypb.Any{}
-	// TODO take this as an input to struct
-	dst.TypeUrl = urlPrefix + string("standardbase.hedwig.UserCreatedV1")
 	dst.Value = data.([]byte)
+	msgType, ver, _ := fcd.DecodeMessageType(metaAttrs.Schema)
+	dst.TypeUrl = fcd.typeUrls[hedwig.MessageTypeMajorVersion{
+		MessageType:  msgType,
+		MajorVersion: uint(ver.Major()),
+	}]
 	container := &hedwigProtobuf.PayloadV1{
 		FormatVersion: fmt.Sprintf("%d.%d", metaAttrs.FormatVersion.Major(), metaAttrs.FormatVersion.Minor()),
 		Id:            metaAttrs.ID,
@@ -63,4 +66,10 @@ func (fcd *FirehoseEncoderDecoder) EncodeMessageType(messageType string, version
 
 func (fcd *FirehoseEncoderDecoder) IsBinary() bool {
 	return true
+}
+
+func NewFirehoseEncodeDecoder(typeUrls map[hedwig.MessageTypeMajorVersion]string) *FirehoseEncoderDecoder {
+	return &FirehoseEncoderDecoder{
+		typeUrls: typeUrls,
+	}
 }

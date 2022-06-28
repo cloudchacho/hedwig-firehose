@@ -109,15 +109,15 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 
 }
 
-func (fp *Firehose) RunFollower(ctx context.Context){
+func (fp *Firehose) RunFollower(ctx context.Context) {
 	// run an infinite loop until canceled
 	// and call handleMessage
 	go fp.flushCron(ctx)
 	// should this be configureable?
 	lr := hedwig.ListenRequest{
-		NumMessages: 1,
+		NumMessages:       1,
 		VisibilityTimeout: defaultVisibilityTimeoutS,
-		NumConcurrency: 1,
+		NumConcurrency:    1,
 	}
 	err := fp.hedwigConsumer.ListenForMessages(ctx, lr)
 	// consumer errored so panic
