@@ -15,7 +15,6 @@ import (
 	"github.com/cloudchacho/hedwig-go/protobuf"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"cloud.google.com/go/pubsub"
@@ -149,7 +148,10 @@ func (s *GcpTestSuite) TestNewFirehose() {
 	gcpSettings := gcp.Settings{}
 	var hedwigLogger hedwig.Logger
 	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
-	msgList := []hedwig.MessageTypeMajorVersion{{"user-created", 1}}
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType: "user-created",
+		MajorVersion: 1,
+	}}
 	var s3 ProcessSettings
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(&storage.Client{})
@@ -159,19 +161,14 @@ func (s *GcpTestSuite) TestNewFirehose() {
 	assert.NotNil(s.T(), f)
 }
 
-type fakeHedwigDataField struct {
-	VehicleID string `json:"vehicle_id"`
-}
-
-type fakeSerializer struct {
-	mock.Mock
-}
-
 func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	var hedwigLogger hedwig.Logger
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
 	// maybe just user-created?
-	msgList := []hedwig.MessageTypeMajorVersion{{"user-created", 1}}
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType: "user-created",
+		MajorVersion: 1,
+	}}
 	s3 := ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
@@ -182,6 +179,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	storageBackend := firehoseGcp.NewBackend(s.storageClient)
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, s2, s3, hedwigLogger)
+	s.Require().NoError(err)
 
 	routing := map[hedwig.MessageTypeMajorVersion]string{
 		{
@@ -192,6 +190,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	pubEncoderDecoder, err := protobuf.NewMessageEncoderDecoder(
 		[]proto.Message{&UserCreatedV1{}},
 	)
+	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -201,6 +200,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	userId := "C_1234567890123456"
 	data := UserCreatedV1{UserId: &userId}
 	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar"}, &data, "myapp")
+	s.Require().NoError(err)
 	_, err = publisher.Publish(ctx, message)
 	s.Require().NoError(err)
 

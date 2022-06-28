@@ -30,13 +30,6 @@ type ProcessSettings struct {
 	OutputBucket string
 }
 
-// ReceivedMessage is the message as received by a transport backend.
-type ReceivedMessage struct {
-	Payload          []byte
-	Attributes       map[string]string
-	ProviderMetadata interface{}
-}
-
 // StorageBackendCreator is used for read/write to storage
 type StorageBackendCreator interface {
 	CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.WriteCloser, error)
@@ -116,13 +109,21 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 
 }
 
-func (fp *Firehose) RunFollower(ctx context.Context) {
+func (fp *Firehose) RunFollower(ctx context.Context){
 	// run an infinite loop until canceled
 	// and call handleMessage
 	go fp.flushCron(ctx)
 	// should this be configureable?
-	lr := hedwig.ListenRequest{1, defaultVisibilityTimeoutS, 1}
-	fp.hedwigConsumer.ListenForMessages(ctx, lr)
+	lr := hedwig.ListenRequest{
+		NumMessages: 1,
+		VisibilityTimeout: defaultVisibilityTimeoutS,
+		NumConcurrency: 1,
+	}
+	err := fp.hedwigConsumer.ListenForMessages(ctx, lr)
+	// consumer errored so panic
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) error {
