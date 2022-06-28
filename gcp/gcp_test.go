@@ -3,9 +3,7 @@ package gcp_test
 import (
 	"context"
 	"testing"
-	"fmt"
 
-	"google.golang.org/api/iterator"
 	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-firehose/gcp"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
@@ -15,9 +13,8 @@ import (
 
 type GcpTestSuite struct {
 	suite.Suite
-	client         *storage.Client
-	server         *fakestorage.Server
-	sampleSettings gcp.Settings
+	client *storage.Client
+	server *fakestorage.Server
 }
 
 func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
@@ -31,11 +28,6 @@ func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
 		},
 	})
 	s.client = s.server.Client()
-	s.sampleSettings = gcp.Settings{
-		MetadataBucket: "some-metadata-bucket",
-		StagingBucket:  "some-staging-bucket",
-		OutputBucket:   "some-output-bucket",
-	}
 }
 
 func (s *GcpTestSuite) AfterTest(suiteName, testName string) {
@@ -45,7 +37,6 @@ func (s *GcpTestSuite) AfterTest(suiteName, testName string) {
 func (s *GcpTestSuite) TestRead() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/file.txt")
 	assert.Equal(s.T(), nil, err)
@@ -55,17 +46,27 @@ func (s *GcpTestSuite) TestRead() {
 func (s *GcpTestSuite) TestReadNotValidLocation() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/notthere.txt")
 	assert.NotNil(s.T(), err)
 	assert.Nil(s.T(), res)
 }
 
+func (s *GcpTestSuite) TestUpload() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	err := b.UploadFile(context.Background(), []byte("test"), "some-bucket", "some/object/test.txt")
+	assert.Equal(s.T(), nil, err)
+
+	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
+	assert.Equal(s.T(), nil, err)
+	assert.Equal(s.T(), []byte("test"), res)
+}
+
 func (s *GcpTestSuite) TestUploadWriter() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	wr, err := b.CreateWriter(context.Background(), "some-bucket", "some/object/test.txt")
 	assert.Equal(s.T(), nil, err)
@@ -75,58 +76,20 @@ func (s *GcpTestSuite) TestUploadWriter() {
 	assert.Equal(s.T(), nil, err)
 
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
-	it := s.client.Bucket("some-bucket").Objects(context.Background(), nil)
-        for {
-                attrs, err := it.Next()
-                if err == iterator.Done {
-                        break
-                }
-                if err != nil {
-			fmt.Println("problem next", err)
-                }
-                fmt.Println(attrs.Name)
-        }
-	fmt.Println("objs in gcs err ", err)
 	assert.Equal(s.T(), nil, err)
 	assert.Equal(s.T(), []byte("test data"), res)
-}
-
-func (s *GcpTestSuite) TestUpload() {
-	b := gcp.Backend{
-		GcsClient: s.client,
-		Settings:  s.sampleSettings,
-	}
-	err := b.UploadFile(context.Background(), []byte("test"), "some-bucket", "some/object/test.txt")
-	assert.Equal(s.T(), nil, err)
-
-	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
-	it := s.client.Bucket("some-bucket").Objects(context.Background(), nil)
-        for {
-                attrs, err := it.Next()
-                if err == iterator.Done {
-                        break
-                }
-                if err != nil {
-			fmt.Println("problem next", err)
-                }
-                fmt.Println(attrs.Name)
-        }
-	fmt.Println("objs in gcs err ", err)
-	assert.Equal(s.T(), nil, err)
-	assert.Equal(s.T(), []byte("test"), res)
 }
 
 func (s *GcpTestSuite) TestUploadNotValidLocation() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	err := b.UploadFile(context.Background(), []byte("test"), "nonexistent-bucket", "some/object/test.txt")
 	assert.NotNil(s.T(), err)
 }
 
 func (s *GcpTestSuite) TestNewBackend() {
-	res := gcp.NewBackend(s.sampleSettings, s.client)
+	res := gcp.NewBackend(s.client)
 	assert.NotNil(s.T(), res)
 }
 
