@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -149,7 +148,13 @@ func (s *GcpTestSuite) TestNewFirehose() {
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(&storage.Client{})
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, s2, s3, hedwigLogger)
+	lr := hedwig.ListenRequest{
+		NumMessages:       2,
+		VisibilityTimeout: defaultVisibilityTimeoutS,
+		NumConcurrency:    2,
+	}
+
+	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	assert.Equal(s.T(), nil, err)
 	assert.NotNil(s.T(), f)
 }
@@ -166,7 +171,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
 		OutputBucket:   "some-output-bucket",
-		FlushAfter:     5,
+		FlushAfter:     2,
 	}
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(s.storageClient)
@@ -174,7 +179,12 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 		{MessageType: "user-created", MajorVersion: 1}: "type.googleapis.com/standardbase.hedwig.UserCreatedV1",
 	}
 	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
-	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, s2, s3, hedwigLogger)
+	lr := hedwig.ListenRequest{
+		NumMessages:       2,
+		VisibilityTimeout: defaultVisibilityTimeoutS,
+		NumConcurrency:    2,
+	}
+	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	// freeze time for test
 	parsed, _ := time.Parse("2006-01-02", "2022-10-15")
@@ -193,7 +203,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 
 	defer cancel()
 
@@ -211,6 +221,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	_, err = publisher.Publish(ctx, message2)
 	s.Require().NoError(err)
 
+	// TODO: Use waitgroup and fix RunFollower to correcly handle cancel
 	go f.RunFollower(ctx)
 
 	// stop test after 5sec, should finish by then
@@ -225,14 +236,16 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 		}
 		s.Require().NoError(err)
 		// check that file under message folder
-		if strings.Contains(attrs.Name, "user-created/1") {
+		if attrs.Name == "user-created/1/2022/10/15/1665792000" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, _ := f.storageBackendCreator.CreateReader(ctx, "some-staging-bucket", attrs.Name)
 			res, err := f.hedwigFirehose.Deserialize(r)
-			fmt.Println(res)
+			assert.Equal(s.T(), 2, len(res))
 			s.Require().NoError(err)
+			for _, r := range res {
+				assert.Contains(s.T(), []map[string]string{message.Metadata.Headers, message2.Metadata.Headers}, r.Metadata.Headers)
+			}
 		}
-		fmt.Println(attrs.Name)
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
 }

@@ -60,11 +60,11 @@ type Firehose struct {
 	flushLock             sync.Mutex
 	flushCh               chan error
 	messageCh             chan ReceivedMessage
+	listenRequest         hedwig.ListenRequest
 	clock                 *Clock
 }
 
 func (fp *Firehose) flushCron(ctx context.Context) {
-	fmt.Println("flush cron")
 	errChannelMapping := make(map[hedwig.MessageTypeMajorVersion][]chan error)
 	writerMapping := make(map[hedwig.MessageTypeMajorVersion]io.WriteCloser)
 	currentTime := fp.clock.Now()
@@ -73,7 +73,6 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 	for {
 		select {
 		case <-timerCh:
-			fmt.Println("closing writers")
 			// close all writers and associated errChannels
 			for key, writer := range writerMapping {
 				err := writer.Close()
@@ -93,7 +92,6 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			return
 		case messageAndChan := <-fp.messageCh:
 			message := messageAndChan.message
-			fmt.Println("processing", message.Metadata.Headers)
 			errCh := messageAndChan.errCh
 			key := hedwig.MessageTypeMajorVersion{
 				MessageType:  message.Type,
@@ -102,7 +100,6 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			// if writer doesn't exist create in mapping
 			if _, ok := writerMapping[key]; !ok {
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
-				fmt.Println("creating writer", uploadLocation)
 				writer, err := fp.storageBackendCreator.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
 					errCh <- err
@@ -131,13 +128,7 @@ func (fp *Firehose) RunFollower(ctx context.Context) {
 	// run an infinite loop until canceled
 	// and call handleMessage
 	go fp.flushCron(ctx)
-	// should this be configureable?
-	lr := hedwig.ListenRequest{
-		NumMessages:       1,
-		VisibilityTimeout: defaultVisibilityTimeoutS,
-		NumConcurrency:    1,
-	}
-	err := fp.hedwigConsumer.ListenForMessages(ctx, lr)
+	err := fp.hedwigConsumer.ListenForMessages(ctx, fp.listenRequest)
 	// consumer errored so panic
 	if err != nil {
 		panic(err)
@@ -146,9 +137,9 @@ func (fp *Firehose) RunFollower(ctx context.Context) {
 
 func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) error {
 	ch := make(chan error)
-	fp.messageCh <- ReceivedMessage {
+	fp.messageCh <- ReceivedMessage{
 		message: message,
-		errCh: ch,
+		errCh:   ch,
 	}
 	// wait until message flushed into GCS file.
 	err := <-ch
@@ -165,7 +156,7 @@ func (f *Firehose) RunFirehose() {
 	// 3. else follower call RunFollower
 }
 
-func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
+func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
 	registry := hedwig.CallbackRegistry{}
 
 	hedwigFirehose := hedwig.NewFirehose(encoderDecoder, encoderDecoder)
@@ -173,7 +164,8 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.E
 		processSettings:       processSettings,
 		storageBackendCreator: storageBackendCreator,
 		hedwigFirehose:        hedwigFirehose,
-		messageCh: make(chan ReceivedMessage),
+		messageCh:             make(chan ReceivedMessage),
+		listenRequest:         listenRequest,
 	}
 	for _, msgTypeVer := range msgList {
 		registry[msgTypeVer] = f.handleMessage
