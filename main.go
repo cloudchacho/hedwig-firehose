@@ -30,10 +30,26 @@ type ProcessSettings struct {
 	OutputBucket string
 }
 
+type ReceivedMessage struct {
+	message *hedwig.Message
+	errCh   chan error
+}
+
 // StorageBackendCreator is used for read/write to storage
 type StorageBackendCreator interface {
 	CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.WriteCloser, error)
 	CreateReader(ctx context.Context, uploadBucket string, uploadLocation string) (io.ReadCloser, error)
+}
+
+type Clock struct {
+	instant time.Time
+}
+
+func (this *Clock) Now() time.Time {
+	if this == nil {
+		return time.Now()
+	}
+	return this.instant
 }
 
 type Firehose struct {
@@ -43,21 +59,21 @@ type Firehose struct {
 	hedwigFirehose        *hedwig.Firehose
 	flushLock             sync.Mutex
 	flushCh               chan error
-	messageCh             chan struct {
-		message *hedwig.Message
-		errCh   chan error
-	}
+	messageCh             chan ReceivedMessage
+	clock                 *Clock
 }
 
 func (fp *Firehose) flushCron(ctx context.Context) {
+	fmt.Println("flush cron")
 	errChannelMapping := make(map[hedwig.MessageTypeMajorVersion][]chan error)
 	writerMapping := make(map[hedwig.MessageTypeMajorVersion]io.WriteCloser)
-	currentTime := time.Now()
+	currentTime := fp.clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.FlushAfter) * time.Second)
 	// go through all msgs and write to msgtype folder
 	for {
 		select {
 		case <-timerCh:
+			fmt.Println("closing writers")
 			// close all writers and associated errChannels
 			for key, writer := range writerMapping {
 				err := writer.Close()
@@ -72,11 +88,12 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 					}
 				}
 			}
-			// start a new flushcron channel, as this one is done
+			// start a new flushcron go routine, as this one is done
 			go fp.flushCron(ctx)
 			return
 		case messageAndChan := <-fp.messageCh:
 			message := messageAndChan.message
+			fmt.Println("processing", message.Metadata.Headers)
 			errCh := messageAndChan.errCh
 			key := hedwig.MessageTypeMajorVersion{
 				MessageType:  message.Type,
@@ -85,6 +102,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			// if writer doesn't exist create in mapping
 			if _, ok := writerMapping[key]; !ok {
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
+				fmt.Println("creating writer", uploadLocation)
 				writer, err := fp.storageBackendCreator.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
 					errCh <- err
@@ -128,10 +146,10 @@ func (fp *Firehose) RunFollower(ctx context.Context) {
 
 func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) error {
 	ch := make(chan error)
-	fp.messageCh <- struct {
-		message *hedwig.Message
-		errCh   chan error
-	}{message, ch}
+	fp.messageCh <- ReceivedMessage {
+		message: message,
+		errCh: ch,
+	}
 	// wait until message flushed into GCS file.
 	err := <-ch
 	return err
@@ -155,10 +173,7 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.E
 		processSettings:       processSettings,
 		storageBackendCreator: storageBackendCreator,
 		hedwigFirehose:        hedwigFirehose,
-		messageCh: make(chan struct {
-			message *hedwig.Message
-			errCh   chan error
-		}),
+		messageCh: make(chan ReceivedMessage),
 	}
 	for _, msgTypeVer := range msgList {
 		registry[msgTypeVer] = f.handleMessage

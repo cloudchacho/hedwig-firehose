@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -22,12 +21,6 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/proto"
 )
-
-var schemaRegex *regexp.Regexp
-
-func init() {
-	schemaRegex = regexp.MustCompile(`([^/]+)/(\d+)\.(\d+)$`)
-}
 
 type GcpTestSuite struct {
 	suite.Suite
@@ -173,7 +166,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
 		OutputBucket:   "some-output-bucket",
-		FlushAfter:     2,
+		FlushAfter:     5,
 	}
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(s.storageClient)
@@ -183,6 +176,10 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
 	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
+	// freeze time for test
+	parsed, _ := time.Parse("2006-01-02", "2022-10-15")
+	c := Clock{instant: parsed}
+	f.clock = &c
 
 	routing := map[hedwig.MessageTypeMajorVersion]string{
 		{
@@ -196,7 +193,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 
 	defer cancel()
 
@@ -207,34 +204,37 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	_, err = publisher.Publish(ctx, message)
 	s.Require().NoError(err)
 
-	_, err = publisher.Publish(ctx, message)
+	userId2 := "C_9012345678901234"
+	data2 := UserCreatedV1{UserId: &userId2}
+	message2, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo2": "bar2"}, &data2, "myapp")
+	s.Require().NoError(err)
+	_, err = publisher.Publish(ctx, message2)
 	s.Require().NoError(err)
 
 	go f.RunFollower(ctx)
 
 	// stop test after 5sec, should finish by then
 	timerCh := time.After(5 * time.Second)
-outer:
+	<-timerCh
+	it := s.storageClient.Bucket("some-staging-bucket").Objects(context.Background(), nil)
+	userCreatedObjs := []string{}
 	for {
-		select {
-		case <-timerCh:
-			it := s.storageClient.Bucket("some-staging-bucket").Objects(context.Background(), nil)
-			userCreatedObjs := []string{}
-			for {
-				attrs, err := it.Next()
-				if err == iterator.Done {
-					break
-				}
-				s.Require().NoError(err)
-				// check that file under message folder
-				if strings.Contains(attrs.Name, "user-created/1") {
-					userCreatedObjs = append(userCreatedObjs, attrs.Name)
-				}
-			}
-			assert.Equal(s.T(), 2, len(userCreatedObjs))
-			break outer
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
 		}
+		s.Require().NoError(err)
+		// check that file under message folder
+		if strings.Contains(attrs.Name, "user-created/1") {
+			userCreatedObjs = append(userCreatedObjs, attrs.Name)
+			r, _ := f.storageBackendCreator.CreateReader(ctx, "some-staging-bucket", attrs.Name)
+			res, err := f.hedwigFirehose.Deserialize(r)
+			fmt.Println(res)
+			s.Require().NoError(err)
+		}
+		fmt.Println(attrs.Name)
 	}
+	assert.Equal(s.T(), 1, len(userCreatedObjs))
 }
 
 func TestGcpTestSuite(t *testing.T) {

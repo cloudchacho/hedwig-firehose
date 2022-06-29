@@ -21,11 +21,11 @@ func (fcd *FirehoseEncoderDecoder) DecodeData(messageType string, version *semve
 	return data, nil
 }
 
-// EncodeData encodes the message with appropriate format for transport over the wire
+// EncodeData encodes the message with appropriate format for firehose storage files
 // Type of data must be proto.Message
 func (fcd *FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTransport bool, metaAttrs hedwig.MetaAttributes) ([]byte, error) {
 	if useMessageTransport {
-		panic("invalid input")
+		panic("Message Transport should not be used for firehose encoding")
 	}
 	dst := anypb.Any{}
 	dst.Value = data.([]byte)
@@ -59,7 +59,7 @@ func (fcd *FirehoseEncoderDecoder) VerifyKnownMinorVersion(messageType string, v
 	return nil
 }
 
-// EncodeMessageType encodes the message type with appropriate format for transport over the wire
+// EncodeMessageType encodes the message type with appropriate format for firehose storage files
 func (fcd *FirehoseEncoderDecoder) EncodeMessageType(messageType string, version *semver.Version) string {
 	return fmt.Sprintf("%s/%d.%d", messageType, version.Major(), version.Minor())
 }

@@ -39,7 +39,7 @@ func (s *GcpTestSuite) TestRead() {
 		GcsClient: s.client,
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/file.txt")
-	assert.Equal(s.T(), nil, err)
+	s.Require().NoError(err)
 	assert.Equal(s.T(), []byte("inside the file"), res)
 }
 
@@ -60,7 +60,7 @@ func (s *GcpTestSuite) TestUpload() {
 	assert.Equal(s.T(), nil, err)
 
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
-	assert.Equal(s.T(), nil, err)
+	s.Require().NoError(err)
 	assert.Equal(s.T(), []byte("test"), res)
 }
 
@@ -71,9 +71,9 @@ func (s *GcpTestSuite) TestUploadWriter() {
 	wr, err := b.CreateWriter(context.Background(), "some-bucket", "some/object/test.txt")
 	assert.Equal(s.T(), nil, err)
 	_, err = wr.Write([]byte("test data"))
-	assert.Equal(s.T(), nil, err)
+	s.Require().NoError(err)
 	err = wr.Close()
-	assert.Equal(s.T(), nil, err)
+	s.Require().NoError(err)
 
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
 	assert.Equal(s.T(), nil, err)
