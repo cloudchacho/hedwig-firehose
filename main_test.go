@@ -216,12 +216,11 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 
 	userId2 := "C_9012345678901234"
 	data2 := UserCreatedV1{UserId: &userId2}
-	message2, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo2": "bar2"}, &data2, "myapp")
+	message2, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar2"}, &data2, "myapp")
 	s.Require().NoError(err)
 	_, err = publisher.Publish(ctx, message2)
 	s.Require().NoError(err)
 
-	// TODO: Use waitgroup and fix RunFollower to correcly handle cancel
 	go f.RunFollower(ctx)
 
 	// stop test after 5sec, should finish by then
@@ -242,9 +241,11 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 			res, err := f.hedwigFirehose.Deserialize(r)
 			assert.Equal(s.T(), 2, len(res))
 			s.Require().NoError(err)
+			foundMetaData := map[string]int{"bar": 0, "bar2": 0}
 			for _, r := range res {
-				assert.Contains(s.T(), []map[string]string{message.Metadata.Headers, message2.Metadata.Headers}, r.Metadata.Headers)
+				foundMetaData[r.Metadata.Headers["foo"]] = foundMetaData[r.Metadata.Headers["foo"]] + 1
 			}
+			assert.Equal(s.T(), foundMetaData, map[string]int{"bar": 1, "bar2": 1})
 		}
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
