@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
-	"sync"
 
 	firehoseGcp "github.com/cloudchacho/hedwig-firehose/gcp"
 	firehoseProtobuf "github.com/cloudchacho/hedwig-firehose/protobuf"
@@ -228,7 +228,9 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	defer wg.Wait()
 	go func() {
 		defer wg.Done()
-		f.RunFollower(ctx)
+		err := f.RunFollower(ctx)
+		// should have errored due to ctx cancel
+		s.Require().NotNil(err)
 	}()
 
 	// stop test after context timeout, should finish by then
