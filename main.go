@@ -120,12 +120,22 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 				continue
 			}
 			errChannelMapping[key] = append(errChannelMapping[key], errCh)
+		case <-ctx.Done():
+			// if ctx closes error all in flight messages
+			for key, _ := range writerMapping {
+				errChannels := errChannelMapping[key]
+				err := ctx.Err()
+				for _, errCh := range errChannels {
+					errCh <- err
+				}
+			}
+			return
 		}
 	}
 
 }
 
-func (fp *Firehose) RunFollower(ctx context.Context) {
+func (fp *Firehose) RunFollower(ctx context.Context) error {
 	// run an infinite loop until canceled
 	// and call handleMessage
 	go fp.flushCron(ctx)
@@ -134,6 +144,7 @@ func (fp *Firehose) RunFollower(ctx context.Context) {
 	if err != nil && err != context.Canceled {
 		panic(err)
 	}
+	return err
 }
 
 func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) error {
