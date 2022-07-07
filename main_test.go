@@ -243,7 +243,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 			s.Require().NoError(err)
 			foundMetaData := map[string]int{"bar": 0, "bar2": 0}
 			for _, r := range res {
-				foundMetaData[r.Metadata.Headers["foo"]] = foundMetaData[r.Metadata.Headers["foo"]] + 1
+				foundMetaData[r.Metadata.Headers["foo"]]++
 			}
 			assert.Equal(s.T(), foundMetaData, map[string]int{"bar": 1, "bar2": 1})
 		}

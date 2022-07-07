@@ -17,13 +17,13 @@ type FirehoseEncoderDecoder struct {
 	typeUrls map[hedwig.MessageTypeMajorVersion]string
 }
 
-func (fcd *FirehoseEncoderDecoder) DecodeData(messageType string, version *semver.Version, data interface{}) (interface{}, error) {
+func (fcd FirehoseEncoderDecoder) DecodeData(messageType string, version *semver.Version, data interface{}) (interface{}, error) {
 	return data, nil
 }
 
 // EncodeData encodes the message with appropriate format for firehose storage files
 // Type of data must be proto.Message
-func (fcd *FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTransport bool, metaAttrs hedwig.MetaAttributes) ([]byte, error) {
+func (fcd FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTransport bool, metaAttrs hedwig.MetaAttributes) ([]byte, error) {
 	if useMessageTransport {
 		panic("Message Transport should not be used for firehose encoding")
 	}
@@ -54,17 +54,17 @@ func (fcd *FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTransp
 }
 
 // VerifyKnownMinorVersion checks that message version is known to us
-func (fcd *FirehoseEncoderDecoder) VerifyKnownMinorVersion(messageType string, version *semver.Version) error {
+func (fcd FirehoseEncoderDecoder) VerifyKnownMinorVersion(messageType string, version *semver.Version) error {
 	// no minor verification
 	return nil
 }
 
 // EncodeMessageType encodes the message type with appropriate format for firehose storage files
-func (fcd *FirehoseEncoderDecoder) EncodeMessageType(messageType string, version *semver.Version) string {
+func (fcd FirehoseEncoderDecoder) EncodeMessageType(messageType string, version *semver.Version) string {
 	return fmt.Sprintf("%s/%d.%d", messageType, version.Major(), version.Minor())
 }
 
-func (fcd *FirehoseEncoderDecoder) IsBinary() bool {
+func (fcd FirehoseEncoderDecoder) IsBinary() bool {
 	return true
 }
 

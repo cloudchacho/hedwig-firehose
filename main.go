@@ -99,6 +99,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			}
 			// if writer doesn't exist create in mapping
 			if _, ok := writerMapping[key]; !ok {
+				// TODO: use node id in this path
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
 				writer, err := fp.storageBackendCreator.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
@@ -130,7 +131,7 @@ func (fp *Firehose) RunFollower(ctx context.Context) {
 	go fp.flushCron(ctx)
 	err := fp.hedwigConsumer.ListenForMessages(ctx, fp.listenRequest)
 	// consumer errored so panic
-	if err != nil {
+	if err != nil && err != context.Canceled {
 		panic(err)
 	}
 }
