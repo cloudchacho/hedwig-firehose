@@ -2,6 +2,7 @@ package protobuf
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/Masterminds/semver"
 	"github.com/cloudchacho/hedwig-go"
@@ -27,13 +28,17 @@ func (fcd FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTranspo
 	if useMessageTransport {
 		panic("Message Transport should not be used for firehose encoding")
 	}
-	dst := anypb.Any{}
-	dst.Value = data.([]byte)
-	msgType, ver, _ := fcd.DecodeMessageType(metaAttrs.Schema)
-	dst.TypeUrl = fcd.typeUrls[hedwig.MessageTypeMajorVersion{
-		MessageType:  msgType,
-		MajorVersion: uint(ver.Major()),
-	}]
+	var dst *anypb.Any
+	if reflect.TypeOf(data) == reflect.TypeOf([]byte(nil)) {
+		dst.Value = data.([]byte)
+		msgType, ver, _ := fcd.DecodeMessageType(metaAttrs.Schema)
+		dst.TypeUrl = fcd.typeUrls[hedwig.MessageTypeMajorVersion{
+			MessageType:  msgType,
+			MajorVersion: uint(ver.Major()),
+		}]
+	} else {
+		dst = data.(*anypb.Any)
+	}
 	container := &hedwigProtobuf.PayloadV1{
 		FormatVersion: fmt.Sprintf("%d.%d", metaAttrs.FormatVersion.Major(), metaAttrs.FormatVersion.Minor()),
 		Id:            metaAttrs.ID,
@@ -43,7 +48,7 @@ func (fcd FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTranspo
 			Headers:   metaAttrs.Headers,
 		},
 		Schema: metaAttrs.Schema,
-		Data:   &dst,
+		Data:   dst,
 	}
 	payload, err := proto.Marshal(container)
 	if err != nil {

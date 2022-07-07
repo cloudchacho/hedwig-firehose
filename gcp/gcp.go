@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 )
 
 // This should satify interface for FirehoseBackend
@@ -23,6 +24,31 @@ func (b *Backend) CreateWriter(ctx context.Context, uploadBucket string, uploadL
 
 func (b *Backend) CreateReader(ctx context.Context, uploadBucket string, uploadLocation string) (io.ReadCloser, error) {
 	return b.GcsClient.Bucket(uploadBucket).Object(uploadLocation).NewReader(ctx)
+}
+
+func (b *Backend) ListFiles(ctx context.Context, bucket string) ([]string, error) {
+	fileNames := []string{}
+	it := b.GcsClient.Bucket(bucket).Objects(ctx, nil)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return fileNames, fmt.Errorf("Bucket(%q).Objects: %v", bucket, err)
+		}
+		fileNames = append(fileNames, attrs.Name)
+	}
+	return fileNames, nil
+}
+
+func (b *Backend) DeleteFile(ctx context.Context, bucket string, location string) error {
+	o := b.GcsClient.Bucket(bucket).Object(location)
+
+	if err := o.Delete(ctx); err != nil {
+		return fmt.Errorf("Object(%q).Delete: %v", location, err)
+	}
+	return nil
 }
 
 func (b *Backend) UploadFile(ctx context.Context, data []byte, uploadBucket string, uploadLocation string) error {
