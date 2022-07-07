@@ -44,5 +44,3 @@ jobs:
         uses: codecov/codecov-action@v1
         with:
           files: ./coverage.txt,./aws/coverage.txt,./jsonschema/coverage.txt,./protobuf/coverage.txt
-        ignore:
-          - schema.pb.go
