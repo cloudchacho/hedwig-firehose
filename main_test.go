@@ -203,7 +203,8 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	contextTimeout := time.Second * 10
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
 	defer cancel()
 
@@ -223,8 +224,8 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 
 	go f.RunFollower(ctx)
 
-	// stop test after 5sec, should finish by then
-	timerCh := time.After(5 * time.Second)
+	// stop test after context timeout, should finish by then
+	timerCh := time.After(contextTimeout)
 	<-timerCh
 	it := s.storageClient.Bucket("some-staging-bucket").Objects(context.Background(), nil)
 	userCreatedObjs := []string{}
@@ -237,10 +238,11 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 		// check that file under message folder
 		if attrs.Name == "user-created/1/2022/10/15/1665792000" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
-			r, _ := f.storageBackendCreator.CreateReader(ctx, "some-staging-bucket", attrs.Name)
-			res, err := f.hedwigFirehose.Deserialize(r)
-			assert.Equal(s.T(), 2, len(res))
+			r, err := f.storageBackendCreator.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
 			s.Require().NoError(err)
+			res, err := f.hedwigFirehose.Deserialize(r)
+			s.Require().NoError(err)
+			assert.Equal(s.T(), 2, len(res))
 			foundMetaData := map[string]int{"bar": 0, "bar2": 0}
 			for _, r := range res {
 				foundMetaData[r.Metadata.Headers["foo"]]++
