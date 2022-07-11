@@ -13,9 +13,8 @@ import (
 
 type GcpTestSuite struct {
 	suite.Suite
-	client         *storage.Client
-	server         *fakestorage.Server
-	sampleSettings gcp.Settings
+	client *storage.Client
+	server *fakestorage.Server
 }
 
 func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
@@ -29,11 +28,6 @@ func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
 		},
 	})
 	s.client = s.server.Client()
-	s.sampleSettings = gcp.Settings{
-		MetadataBucket: "some-metadata-bucket",
-		StagingBucket:  "some-staging-bucket",
-		OutputBucket:   "some-output-bucket",
-	}
 }
 
 func (s *GcpTestSuite) AfterTest(suiteName, testName string) {
@@ -43,17 +37,15 @@ func (s *GcpTestSuite) AfterTest(suiteName, testName string) {
 func (s *GcpTestSuite) TestRead() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/file.txt")
-	assert.Equal(s.T(), nil, err)
+	s.Require().NoError(err)
 	assert.Equal(s.T(), []byte("inside the file"), res)
 }
 
 func (s *GcpTestSuite) TestReadNotValidLocation() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/notthere.txt")
 	assert.NotNil(s.T(), err)
@@ -63,27 +55,41 @@ func (s *GcpTestSuite) TestReadNotValidLocation() {
 func (s *GcpTestSuite) TestUpload() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	err := b.UploadFile(context.Background(), []byte("test"), "some-bucket", "some/object/test.txt")
 	assert.Equal(s.T(), nil, err)
 
 	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
-	assert.Equal(s.T(), nil, err)
+	s.Require().NoError(err)
 	assert.Equal(s.T(), []byte("test"), res)
+}
+
+func (s *GcpTestSuite) TestUploadWriter() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	wr, err := b.CreateWriter(context.Background(), "some-bucket", "some/object/test.txt")
+	assert.Equal(s.T(), nil, err)
+	_, err = wr.Write([]byte("test data"))
+	s.Require().NoError(err)
+	err = wr.Close()
+	s.Require().NoError(err)
+
+	res, err := b.ReadFile(context.Background(), "some-bucket", "some/object/test.txt")
+	assert.Equal(s.T(), nil, err)
+	assert.Equal(s.T(), []byte("test data"), res)
 }
 
 func (s *GcpTestSuite) TestUploadNotValidLocation() {
 	b := gcp.Backend{
 		GcsClient: s.client,
-		Settings:  s.sampleSettings,
 	}
 	err := b.UploadFile(context.Background(), []byte("test"), "nonexistent-bucket", "some/object/test.txt")
 	assert.NotNil(s.T(), err)
 }
 
 func (s *GcpTestSuite) TestNewBackend() {
-	res := gcp.NewBackend(s.sampleSettings, s.client)
+	res := gcp.NewBackend(s.client)
 	assert.NotNil(s.T(), res)
 }
 
