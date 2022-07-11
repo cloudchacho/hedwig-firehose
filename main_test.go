@@ -234,7 +234,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	}()
 
 	// stop test after context timeout, should finish by then
-	timerCh := time.After(contextTimeout)
+	timerCh := time.After(time.Second * 8)
 	<-timerCh
 	it := s.storageClient.Bucket("some-staging-bucket").Objects(context.Background(), nil)
 	userCreatedObjs := []string{}

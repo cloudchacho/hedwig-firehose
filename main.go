@@ -141,7 +141,7 @@ func (fp *Firehose) RunFollower(ctx context.Context) error {
 	go fp.flushCron(ctx)
 	err := fp.hedwigConsumer.ListenForMessages(ctx, fp.listenRequest)
 	// consumer errored so panic
-	if err != nil && err != context.Canceled {
+	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
 		panic(err)
 	}
 	return err
