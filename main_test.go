@@ -243,7 +243,6 @@ outer:
 			<-time.After(time.Second * 2)
 			_, err := s.storageClient.Bucket("some-staging-bucket").Object("user-created/1/2022/10/15/1665792000").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
-				fmt.Println("object not ready")
 				continue
 			}
 			break outer
@@ -274,6 +273,7 @@ outer:
 		}
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
+	cancel()
 }
 
 func TestGcpTestSuite(t *testing.T) {
