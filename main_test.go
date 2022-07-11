@@ -204,7 +204,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 
-	contextTimeout := time.Second * 10
+	contextTimeout := time.Second * 30
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
 	defer cancel()
@@ -233,9 +233,23 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 		s.Require().NotNil(err)
 	}()
 
-	// stop test after context timeout, should finish by then
-	timerCh := time.After(time.Second * 8)
-	<-timerCh
+outer:
+	for {
+		select {
+		case <- ctx.Done():
+			s.T().FailNow()
+		default:
+			// poll for file every 2 seconds
+			<-time.After(time.Second * 2)
+			_, err := s.storageClient.Bucket("some-staging-bucket").Object("user-created/1/2022/10/15/1665792000").Attrs(ctx)
+			if err == storage.ErrObjectNotExist {
+				fmt.Println("object not ready")
+				continue
+			}
+			break outer
+		}
+	}
+
 	it := s.storageClient.Bucket("some-staging-bucket").Objects(context.Background(), nil)
 	userCreatedObjs := []string{}
 	for {
