@@ -245,6 +245,8 @@ outer:
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
+			// wait one second to continue test after file detected
+			<-time.After(time.Second * 1)
 			break outer
 		}
 	}
