@@ -160,6 +160,58 @@ func (s *GcpTestSuite) TestNewFirehose() {
 	assert.NotNil(s.T(), f)
 }
 
+func (s *GcpTestSuite) TestFollowerCtxDone() {
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
+	// maybe just user-created?
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+		StagingBucket:  "some-staging-bucket",
+		OutputBucket:   "some-output-bucket",
+		FlushAfter:     2,
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	msgTypeUrls := map[hedwig.MessageTypeMajorVersion]string{
+		{MessageType: "user-created", MajorVersion: 1}: "type.googleapis.com/standardbase.hedwig.UserCreatedV1",
+	}
+	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
+	lr := hedwig.ListenRequest{
+		NumMessages:       2,
+		VisibilityTimeout: defaultVisibilityTimeoutS,
+		NumConcurrency:    2,
+	}
+	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().NoError(err)
+
+	contextTimeout := time.Second * 1
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+
+	defer cancel()
+	userId := "C_1234567890123456"
+	data := UserCreatedV1{UserId: &userId}
+	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar"}, &data, "myapp")
+	s.Require().NoError(err)
+	routing := map[hedwig.MessageTypeMajorVersion]string{
+		{
+			MessageType:  "user-created",
+			MajorVersion: 1,
+		}: "dev-user-created-v1",
+	}
+	pubEncoderDecoder, err := protobuf.NewMessageEncoderDecoder(
+		[]proto.Message{&UserCreatedV1{}},
+	)
+	s.Require().NoError(err)
+	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
+	_, err = publisher.Publish(ctx, message)
+
+	_ = f.RunFollower(ctx)
+}
+
 func (s *GcpTestSuite) TestFollowerPanic() {
 	defer func() {
 		if r := recover(); r == nil {
