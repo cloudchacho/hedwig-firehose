@@ -190,7 +190,7 @@ func (s *GcpTestSuite) TestFollowerPanic() {
 	defer cancel()
 	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
-	f.RunFollower(ctx)
+	_ = f.RunFollower(ctx)
 }
 
 func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
@@ -269,7 +269,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 outer:
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			s.T().FailNow()
 		default:
 			// poll for file every 2 seconds
