@@ -274,8 +274,15 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-staging-bucket").Object("user-created/1/2022/10/15/1665792000").Attrs(ctx)
+			attrs, err := s.storageClient.Bucket("some-staging-bucket").Object("user-created/1/2022/10/15/1665792000").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
+				continue
+			}
+			r, err := f.storageBackendCreator.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			s.Require().NoError(err)
+			_, err = f.hedwigFirehose.Deserialize(r)
+			// keep trying if file can not be deserialized
+			if err != nil {
 				continue
 			}
 			// wait one second to continue test after file detected
