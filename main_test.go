@@ -454,8 +454,7 @@ func (s *GcpTestSuite) TestFirehoseLeaderIntegration() {
 	defer wg.Wait()
 	go func() {
 		defer wg.Done()
-		err := f.RunLeader(ctx)
-		s.Require().NoError(err)
+		f.RunLeader(ctx)
 	}()
 
 outer:

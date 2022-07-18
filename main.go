@@ -229,7 +229,7 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.Mes
 	return nil
 }
 
-func (fp *Firehose) RunLeader(ctx context.Context) error {
+func (fp *Firehose) RunLeader(ctx context.Context) {
 	currentTime := fp.clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 	// go through all msgs and write to msgtype folder
@@ -239,7 +239,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) error {
 			wg := &sync.WaitGroup{}
 			for mtmv, _ := range fp.registry {
 				wg.Add(1)
-				go func() {
+				go func(mtmv hedwig.MessageTypeMajorVersion) {
 					defer wg.Done()
 					err := fp.moveFilesToOutputBucket(ctx, mtmv, currentTime)
 					// just logs errors but will retry on next run of leader
@@ -250,19 +250,21 @@ func (fp *Firehose) RunLeader(ctx context.Context) error {
 							"messageVersion", fmt.Sprint(mtmv.MajorVersion),
 						)
 					}
-				}()
+				}(mtmv)
 			}
 			wg.Wait()
 			// restart scrape interval and run leader again
 			go fp.RunLeader(ctx)
-			return nil
+			return
 		case <-ctx.Done():
 			err := ctx.Err()
-			if err == context.Canceled && err == context.DeadlineExceeded {
-				// dont return err if context stopped process
-				return nil
+			// dont return err if context stopped process
+			if err != context.Canceled && err != context.DeadlineExceeded {
+				fp.logger.Error(ctx, err, "RunLeader failed",
+					"currentTime", currentTime.Unix(),
+				)
 			}
-			return err
+			return
 		}
 	}
 }

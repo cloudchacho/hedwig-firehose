@@ -28,7 +28,8 @@ func (fcd FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTranspo
 		panic("Message Transport should not be used for firehose encoding")
 	}
 	dst := &anypb.Any{}
-	dataBytes, ok := data.([]byte); if ok {
+	dataBytes, ok := data.([]byte)
+	if ok {
 		// during initial read from pubsub data will be of type []byte
 		dst.Value = dataBytes
 		msgType, ver, _ := fcd.DecodeMessageType(metaAttrs.Schema)
