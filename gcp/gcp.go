@@ -26,9 +26,9 @@ func (b *Backend) CreateReader(ctx context.Context, uploadBucket string, uploadL
 	return b.GcsClient.Bucket(uploadBucket).Object(uploadLocation).NewReader(ctx)
 }
 
-func (b *Backend) ListFiles(ctx context.Context, bucket string) ([]string, error) {
+func (b *Backend) ListFilesPrefix(ctx context.Context, bucket string, prefix string) ([]string, error) {
 	fileNames := []string{}
-	it := b.GcsClient.Bucket(bucket).Objects(ctx, nil)
+	it := b.GcsClient.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: prefix})
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {

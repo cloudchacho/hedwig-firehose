@@ -351,7 +351,7 @@ outer:
 		// check that file under message folder
 		if attrs.Name == "user-created/1/2022/10/15/1665792000" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
-			r, err := f.storageBackendCreator.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			r, err := f.storageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
 			s.Require().NoError(err)
 			res, err := f.hedwigFirehose.Deserialize(r)
 			s.Require().NoError(err)
@@ -368,7 +368,7 @@ outer:
 }
 
 func (s *GcpTestSuite) TestFirehoseLeaderIntegration() {
-	var hedwigLogger hedwig.Logger
+	hedwigLogger := hedwig.StdLogger{}
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
 	// maybe just user-created?
 	msgList := []hedwig.MessageTypeMajorVersion{{
@@ -467,7 +467,7 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-output-bucket").Object("user-created/2022/10/16/user-created-1665878400.gz").Attrs(ctx)
+			_, err := s.storageClient.Bucket("some-output-bucket").Object("user-created/1/2022/10/16/user-created-1-1665878400.gz").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -486,9 +486,9 @@ outer:
 		}
 		s.Require().NoError(err)
 		// check that file under message folder
-		if attrs.Name == "user-created/2022/10/16/user-created-1665878400.gz" {
+		if attrs.Name == "user-created/1/2022/10/16/user-created-1-1665878400.gz" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
-			r, err := f.storageBackendCreator.CreateReader(ctx, "some-output-bucket", attrs.Name)
+			r, err := f.storageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			s.Require().NoError(err)
 			res, err := f.hedwigFirehose.Deserialize(r)
 			// check errors

@@ -49,11 +49,12 @@ func (t byTimestamp) Less(i, j int) bool {
 	return t[i].Metadata.Timestamp.Unix() < t[j].Metadata.Timestamp.Unix()
 }
 
-// StorageBackendCreator is used for read/write to storage
-type StorageBackendCreator interface {
+// StorageBackend is used for interacting with storage
+type StorageBackend interface {
 	CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.WriteCloser, error)
 	CreateReader(ctx context.Context, uploadBucket string, uploadLocation string) (io.ReadCloser, error)
-	ListFiles(ctx context.Context, bucket string) ([]string, error)
+	// ListFilesPrefix should list all objects with a certain prefix
+	ListFilesPrefix(ctx context.Context, bucket string, prefix string) ([]string, error)
 	DeleteFile(ctx context.Context, bucket string, location string) error
 }
 
@@ -69,15 +70,17 @@ func (this *Clock) Now() time.Time {
 }
 
 type Firehose struct {
-	processSettings       ProcessSettings
-	storageBackendCreator StorageBackendCreator
-	hedwigConsumer        *hedwig.QueueConsumer
-	hedwigFirehose        *hedwig.Firehose
-	flushLock             sync.Mutex
-	flushCh               chan error
-	messageCh             chan ReceivedMessage
-	listenRequest         hedwig.ListenRequest
-	clock                 *Clock
+	processSettings ProcessSettings
+	storageBackend  StorageBackend
+	hedwigConsumer  *hedwig.QueueConsumer
+	logger          hedwig.Logger
+	registry        hedwig.CallbackRegistry
+	hedwigFirehose  *hedwig.Firehose
+	flushLock       sync.Mutex
+	flushCh         chan error
+	messageCh       chan ReceivedMessage
+	listenRequest   hedwig.ListenRequest
+	clock           *Clock
 }
 
 func (fp *Firehose) flushCron(ctx context.Context) {
@@ -117,7 +120,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			if _, ok := writerMapping[key]; !ok {
 				// TODO: use node id in this path
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
-				writer, err := fp.storageBackendCreator.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
+				writer, err := fp.storageBackend.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
 					errCh <- err
 					continue
@@ -174,66 +177,82 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 	return err
 }
 
+func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.MessageTypeMajorVersion, currTime time.Time) error {
+	// read from staging
+	filePathPrefix := fmt.Sprintf("%s/%s", mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion))
+	fileNames, err := fp.storageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
+	if err != nil {
+		return err
+	}
+	var msgs byTimestamp
+	for _, fileName := range fileNames {
+		r, err := fp.storageBackend.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
+		if err != nil {
+			return err
+		}
+		res, err := fp.hedwigFirehose.Deserialize(r)
+		if err != nil {
+			return err
+		}
+		for _, r := range res {
+			msgs = append(msgs, &r)
+		}
+	}
+	if len(msgs) > 0 {
+		// sort by timestamp
+		sort.Sort(msgs)
+		uploadLocation := fmt.Sprintf("%s/%s/%s/%s-%s-%s.gz", mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion), currTime.Format("2006/1/2"), mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion), fmt.Sprint(currTime.Unix()))
+		r, err := fp.storageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
+		if err != nil {
+			return err
+		}
+		for _, msg := range msgs {
+			payload, err := fp.hedwigFirehose.Serialize(msg)
+			if err != nil {
+				return err
+			}
+			_, err = r.Write(payload)
+			if err != nil {
+				return err
+			}
+		}
+		err = r.Close()
+		if err != nil {
+			return err
+		}
+		// delete files when written to final output path
+		for _, fileName := range fileNames {
+			// ignore errors when deleting, picked up again on next run
+			_ = fp.storageBackend.DeleteFile(ctx, fp.processSettings.StagingBucket, fileName)
+		}
+	}
+	return nil
+}
+
 func (fp *Firehose) RunLeader(ctx context.Context) error {
 	currentTime := fp.clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
-	groupedMsgs := map[string]byTimestamp{}
 	// go through all msgs and write to msgtype folder
 	for {
 		select {
 		case <-timerCh:
-			// read from staging
-			fileNames, err := fp.storageBackendCreator.ListFiles(ctx, fp.processSettings.StagingBucket)
-			if err != nil {
-				return err
-			}
-			// sort by topic
-			for _, fileName := range fileNames {
-				r, err := fp.storageBackendCreator.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
-				if err != nil {
-					return err
-				}
-				res, err := fp.hedwigFirehose.Deserialize(r)
-				if err != nil {
-					return err
-				}
-				for _, r := range res {
-					msgType := r.Type
-					groupedMsgs[msgType] = append(groupedMsgs[msgType], &r)
-				}
-			}
-			// sort then write to ${OUTPUT_BUCKET}/${TOPIC}/${YEAR}/${MONTH}/${DAY}/${TOPIC}-${DATETIME}.gz
-			for msgType, mg := range groupedMsgs {
-				// sort by timestamp
-				sort.Sort(mg)
-				// should major ver be in this path?
-				uploadLocation := fmt.Sprintf("%s/%s/%s-%s.gz", msgType, currentTime.Format("2006/1/2"), msgType, fmt.Sprint(currentTime.Unix()))
-				r, err := fp.storageBackendCreator.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
-				if err != nil {
-					return err
-				}
-				for _, msg := range mg {
-					payload, err := fp.hedwigFirehose.Serialize(msg)
+			wg := &sync.WaitGroup{}
+			for mtmv, _ := range fp.registry {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					err := fp.moveFilesToOutputBucket(ctx, mtmv, currentTime)
+					// just logs errors but will retry on next run of leader
 					if err != nil {
-						return err
+						fmt.Println(err.Error())
+						fp.logger.Error(ctx, err, "moving files failed",
+							"messageType", mtmv.MessageType,
+							"messageVersion", fmt.Sprint(mtmv.MajorVersion),
+						)
 					}
-					_, err = r.Write(payload)
-					if err != nil {
-						return err
-					}
-				}
-				err = r.Close()
-				if err != nil {
-					fmt.Println(err.Error())
-					return err
-				}
+				}()
 			}
-			// delete files when written to final output path
-			for _, fileName := range fileNames {
-				// ignore errors when deleting, picked up again on next run
-				err = fp.storageBackendCreator.DeleteFile(ctx, fp.processSettings.StagingBucket, fileName)
-			}
-
+			wg.Wait()
 			// restart scrape interval and run leader again
 			go fp.RunLeader(ctx)
 			return nil
@@ -255,22 +274,24 @@ func (f *Firehose) RunFirehose() {
 	// 3. else follower call RunFollower
 }
 
-func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackendCreator StorageBackendCreator, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
+func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
 	registry := hedwig.CallbackRegistry{}
 
 	hedwigFirehose := hedwig.NewFirehose(encoderDecoder, encoderDecoder)
 	f := &Firehose{
-		processSettings:       processSettings,
-		storageBackendCreator: storageBackendCreator,
-		hedwigFirehose:        hedwigFirehose,
-		messageCh:             make(chan ReceivedMessage),
-		listenRequest:         listenRequest,
+		processSettings: processSettings,
+		storageBackend:  storageBackend,
+		hedwigFirehose:  hedwigFirehose,
+		logger:          logger,
+		messageCh:       make(chan ReceivedMessage),
+		listenRequest:   listenRequest,
 	}
 	for _, msgTypeVer := range msgList {
 		registry[msgTypeVer] = f.handleMessage
 	}
 	hedwigConsumer := hedwig.NewQueueConsumer(consumerBackend, encoderDecoder, logger, registry)
 	f.hedwigConsumer = hedwigConsumer
+	f.registry = registry
 	return f, nil
 }
 

@@ -2,7 +2,6 @@ package protobuf
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/Masterminds/semver"
 	"github.com/cloudchacho/hedwig-go"
@@ -28,15 +27,17 @@ func (fcd FirehoseEncoderDecoder) EncodeData(data interface{}, useMessageTranspo
 	if useMessageTransport {
 		panic("Message Transport should not be used for firehose encoding")
 	}
-	var dst *anypb.Any
-	if reflect.TypeOf(data) == reflect.TypeOf([]byte(nil)) {
-		dst.Value = data.([]byte)
+	dst := &anypb.Any{}
+	dataBytes, ok := data.([]byte); if ok {
+		// during initial read from pubsub data will be of type []byte
+		dst.Value = dataBytes
 		msgType, ver, _ := fcd.DecodeMessageType(metaAttrs.Schema)
 		dst.TypeUrl = fcd.typeUrls[hedwig.MessageTypeMajorVersion{
 			MessageType:  msgType,
 			MajorVersion: uint(ver.Major()),
 		}]
 	} else {
+		// during reading of staging firehose files and rewriting to final bucket data will be of type anypb.Any
 		dst = data.(*anypb.Any)
 	}
 	container := &hedwigProtobuf.PayloadV1{
