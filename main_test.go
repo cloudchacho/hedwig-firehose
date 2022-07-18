@@ -327,7 +327,7 @@ outer:
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
-			r, err := f.storageBackendCreator.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			r, err := f.storageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
 			s.Require().NoError(err)
 			_, err = f.hedwigFirehose.Deserialize(r)
 			// keep trying if file can not be deserialized
