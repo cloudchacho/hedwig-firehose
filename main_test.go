@@ -290,7 +290,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 
-	contextTimeout := time.Second * 30
+	contextTimeout := time.Second * 60
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
 	defer cancel()
