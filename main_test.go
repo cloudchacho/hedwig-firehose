@@ -208,6 +208,7 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
 	_, err = publisher.Publish(ctx, message)
+	s.Require().NoError(err)
 
 	_ = f.RunFollower(ctx)
 }
