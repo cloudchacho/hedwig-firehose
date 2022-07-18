@@ -114,7 +114,7 @@ func (s *GcpTestSuite) TearDownSuite() {
 	}
 }
 
-func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
+func (s *GcpTestSuite) SetupTest() {
 	s.server = fakestorage.NewServer([]fakestorage.Object{
 		{
 			ObjectAttrs: fakestorage.ObjectAttrs{
@@ -133,7 +133,7 @@ func (s *GcpTestSuite) BeforeTest(suiteName, testName string) {
 	s.pubSubSettings = settings
 }
 
-func (s *GcpTestSuite) AfterTest(suiteName, testName string) {
+func (s *GcpTestSuite) TearDownTest() {
 	s.server.Stop()
 }
 
