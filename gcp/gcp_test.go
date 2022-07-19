@@ -120,7 +120,7 @@ func (s *GcpTestSuite) TestListFilesPrefix() {
 		},
 	)
 	fileNames, err := b.ListFilesPrefix(context.Background(), "some-bucket", "some/object")
-	assert.NotNil(s.T(), err)
+	assert.Nil(s.T(), err)
 	found := map[string]int{
 		"some/object/file.txt":  0,
 		"some/object/file1.txt": 0,
