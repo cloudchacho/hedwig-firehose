@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"sort"
 	"sync"
 	"time"
+	"encoding/json"
 
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
@@ -55,6 +57,9 @@ type StorageBackend interface {
 	// ListFilesPrefix should list all objects with a certain prefix
 	ListFilesPrefix(ctx context.Context, bucket string, prefix string) ([]string, error)
 	DeleteFile(ctx context.Context, bucket string, location string) error
+	GetNodeId(ctx context.Context) string
+	GetDeploymentId(ctx context.Context) string
+	WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error
 }
 
 type Clock struct {
@@ -269,11 +274,78 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 	}
 }
 
+func (fp *Firehose) isLeader(ctx context.Context) (*bool, error) {
+	isLeader := true
+	nodeId := fp.storageBackend.GetNodeId(ctx)
+	deploymentId := fp.storageBackend.GetDeploymentId(ctx)
+	if nodeId == "" || deploymentId == "" {
+		panic("nodeId or deploymentId can not be determined")
+	}
+	leaderWriteErr := fp.storageBackend.WriteLeaderFile(ctx, fp.processSettings.MetadataBucket, nodeId, deploymentId)
+	// leader.json already exists (probably have to check specific error?)
+	if leaderWriteErr != nil {
+		r, err := fp.storageBackend.CreateReader(ctx, fp.processSettings.MetadataBucket, "leader.json")
+		defer r.Close()
+		if err != nil {
+			// should this retry the read? feel like this shouldn't error
+		}
+		data, err := ioutil.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
+		var result map[string]interface{}
+		json.Unmarshal(data, &result)
+		if result["nodeId"] == nodeId && result["deploymentId"] == deploymentId {
+			return &isLeader, nil
+		}
+
+		if result["deploymentId"] == deploymentId {
+			return nil, fmt.Errorf("deploymentId does not match current leader")
+		}
+		isLeader = false
+		return &isLeader, nil
+	}
+	return &isLeader, nil
+}
+
 // RunFirehose starts a Firehose running in leader of follower mode
-func (f *Firehose) RunFirehose() {
+func (fp *Firehose) RunFirehose(ctx context.Context) {
 	// 1. on start up determine if leader or followerBackend
-	// 2. if leader call RunLeader
-	// 3. else follower call RunFollower
+	globalTimeout := 30
+	timeCheckingLeader := 0
+	var isLeader *bool
+outer:
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// poll for valid isLeader every 2 seconds
+			interval := 2
+			<-time.After(time.Second * time.Duration(interval))
+			var err error
+			isLeader, err = fp.isLeader(ctx)
+			if err != nil {
+				timeCheckingLeader = timeCheckingLeader + interval
+				if timeCheckingLeader >= globalTimeout {
+					panic("failed to read leader file or deploymentId did not match")
+				}
+				// retry if error reading leader file
+				continue
+			}
+			break outer
+		}
+	}
+	if *isLeader {
+		// 2. if leader call RunLeader
+		go fp.RunLeader(ctx)
+	} else {
+		// 3. else follower call RunFollower
+		err := fp.RunFollower(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {

@@ -1,12 +1,14 @@
 package gcp
 
 import (
+	"os"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"time"
+	"encoding/json"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
@@ -87,6 +89,32 @@ func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation 
 		return nil, fmt.Errorf("ioutil.ReadAll: %v", err)
 	}
 	return data, nil
+}
+
+func (b *Backend) GetNodeId(ctx context.Context) string {
+	return os.Getenv("GAE_INSTANCE")
+}
+
+func (b *Backend) GetDeploymentId(ctx context.Context) string {
+	return os.Getenv("GAE_DEPLOYMENT_ID")
+}
+
+func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error {
+	w := b.GcsClient.Bucket(metadataBucket).Object("leader.json").If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
+	defer w.Close()
+	jsonStr, err := json.Marshal(map[string]string{
+		"timestamp": fmt.Sprint(time.Now().Unix()),
+		"deploymentId": deploymentId,
+		"nodeId": nodeId,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(jsonStr)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // NewBackend creates a Firehose on GCP
