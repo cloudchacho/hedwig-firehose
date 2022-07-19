@@ -88,6 +88,14 @@ func (s *GcpTestSuite) TestUploadNotValidLocation() {
 	assert.NotNil(s.T(), err)
 }
 
+func (s *GcpTestSuite) TestListFilesPrefixErr() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	_, err := b.ListFilesPrefix(context.Background(), "nonexistent-bucket", "!@#%$ ")
+	assert.NotNil(s.T(), err)
+}
+
 func (s *GcpTestSuite) TestListFilesPrefix() {
 	b := gcp.Backend{
 		GcsClient: s.client,
