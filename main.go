@@ -186,6 +186,7 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.Mes
 	var msgs byTimestamp
 	for _, fileName := range fileNames {
 		r, err := fp.storageBackend.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
+		defer r.Close()
 		if err != nil {
 			return err
 		}

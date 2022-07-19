@@ -328,6 +328,7 @@ outer:
 				continue
 			}
 			r, err := f.storageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			defer r.Close()
 			s.Require().NoError(err)
 			_, err = f.hedwigFirehose.Deserialize(r)
 			// keep trying if file can not be deserialized
@@ -352,6 +353,7 @@ outer:
 		if attrs.Name == "user-created/1/2022/10/15/1665792000" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.storageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			defer r.Close()
 			s.Require().NoError(err)
 			res, err := f.hedwigFirehose.Deserialize(r)
 			s.Require().NoError(err)
