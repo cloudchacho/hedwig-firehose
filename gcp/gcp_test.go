@@ -122,12 +122,12 @@ func (s *GcpTestSuite) TestListFilesPrefix() {
 	fileNames, err := b.ListFilesPrefix(context.Background(), "some-bucket", "some/object")
 	assert.NotNil(s.T(), err)
 	found := map[string]int{
-		"some/object/file.txt": 0,
+		"some/object/file.txt":  0,
 		"some/object/file1.txt": 0,
 		"some/object/file2.txt": 0,
 	}
 	expected := map[string]int{
-		"some/object/file.txt": 1,
+		"some/object/file.txt":  1,
 		"some/object/file1.txt": 1,
 		"some/object/file2.txt": 1,
 	}
@@ -136,7 +136,6 @@ func (s *GcpTestSuite) TestListFilesPrefix() {
 	}
 	assert.Equal(s.T(), found, expected)
 }
-
 
 func (s *GcpTestSuite) TestDeleteFile() {
 	b := gcp.Backend{
