@@ -88,6 +88,83 @@ func (s *GcpTestSuite) TestUploadNotValidLocation() {
 	assert.NotNil(s.T(), err)
 }
 
+func (s *GcpTestSuite) TestListFilesPrefixErr() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	_, err := b.ListFilesPrefix(context.Background(), "nonexistent-bucket", "!@#%$ ")
+	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestListFilesPrefix() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "some/object/file1.txt",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "some/object/file2.txt",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "someother/object/file2.txt",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+	fileNames, err := b.ListFilesPrefix(context.Background(), "some-bucket", "some/object")
+	assert.Nil(s.T(), err)
+	found := map[string]int{
+		"some/object/file.txt":  0,
+		"some/object/file1.txt": 0,
+		"some/object/file2.txt": 0,
+	}
+	expected := map[string]int{
+		"some/object/file.txt":  1,
+		"some/object/file1.txt": 1,
+		"some/object/file2.txt": 1,
+	}
+	for _, fileName := range fileNames {
+		found[fileName]++
+	}
+	assert.Equal(s.T(), found, expected)
+}
+
+func (s *GcpTestSuite) TestDeleteFile() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	ctx := context.Background()
+	err := b.DeleteFile(ctx, "some-bucket", "some/object/file.txt")
+	assert.Nil(s.T(), err)
+	_, err = s.client.Bucket("some-bucket").Object("some/object/file.txt").Attrs(ctx)
+	assert.Equal(s.T(), err, storage.ErrObjectNotExist)
+}
+
+func (s *GcpTestSuite) TestDeleteFileErr() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	ctx := context.Background()
+	err := b.DeleteFile(ctx, "some-bucket", "some/object/doesnotexist.txt")
+	assert.NotNil(s.T(), err)
+}
+
 func (s *GcpTestSuite) TestNewBackend() {
 	res := gcp.NewBackend(s.client)
 	assert.NotNil(s.T(), res)
