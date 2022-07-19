@@ -142,10 +142,19 @@ func (s *GcpTestSuite) TestDeleteFile() {
 		GcsClient: s.client,
 	}
 	ctx := context.Background()
-	err := b.DeleteFile(ctx, "some-bucket", "some/object/test.txt")
-	assert.NotNil(s.T(), err)
-	_, err = s.client.Bucket("some-bucket").Object("some/object/test.txt").Attrs(ctx)
+	err := b.DeleteFile(ctx, "some-bucket", "some/object/file.txt")
+	assert.Nil(s.T(), err)
+	_, err = s.client.Bucket("some-bucket").Object("some/object/file.txt").Attrs(ctx)
 	assert.Equal(s.T(), err, storage.ErrObjectNotExist)
+}
+
+func (s *GcpTestSuite) TestDeleteFileErr() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	ctx := context.Background()
+	err := b.DeleteFile(ctx, "some-bucket", "some/object/doesnotexist.txt")
+	assert.NotNil(s.T(), err)
 }
 
 func (s *GcpTestSuite) TestNewBackend() {

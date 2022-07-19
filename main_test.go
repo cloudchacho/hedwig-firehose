@@ -490,6 +490,7 @@ outer:
 		if attrs.Name == "user-created/1/2022/10/16/user-created-1-1665878400.gz" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.storageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
+			defer r.Close()
 			s.Require().NoError(err)
 			res, err := f.hedwigFirehose.Deserialize(r)
 			// check errors
