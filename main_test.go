@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
+	"io/ioutil"
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -120,6 +123,7 @@ func (s *GcpTestSuite) SetupTest() {
 	s.server = fakestorage.NewServer([]fakestorage.Object{})
 	s.server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "some-staging-bucket"})
 	s.server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "some-output-bucket"})
+	s.server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "some-metadata-bucket"})
 	s.storageClient = s.server.Client()
 	settings := gcp.Settings{
 		GoogleCloudProject: "emulator-project",
@@ -509,6 +513,133 @@ outer:
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
 	cancel()
+}
+
+func (s *GcpTestSuite) TestIsLeaderNoFile() {
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	res, err := f.IsLeader(ctx)
+	s.Require().Nil(err)
+	assert.Equal(s.T(), *res, true)
+
+	r, err := f.storageBackend.CreateReader(ctx, f.processSettings.MetadataBucket, "leader.json")
+	defer r.Close()
+	data, err := ioutil.ReadAll(r)
+	s.Require().Nil(err)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(data, &result)
+	assert.Nil(s.T(), err)
+	assert.Equal(s.T(), result["deploymentId"], deployment)
+	assert.Equal(s.T(), result["nodeId"], instance)
+}
+
+func (s *GcpTestSuite) TestIsLeaderMatchingNode() {
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("{\"deploymentId\": \"deployment_1\", \"nodeId\": \"instance_1\", \"timestamp\": \"1658342551\"}"),
+		},
+	)
+
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	res, err := f.IsLeader(ctx)
+	s.Require().Nil(err)
+	assert.Equal(s.T(), *res, true)
+}
+
+func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("{\"deploymentId\": \"deployment_2\", \"nodeId\": \"instance_1\", \"timestamp\": \"1658342551\"}"),
+		},
+	)
+
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	res, err := f.IsLeader(ctx)
+	s.Require().Nil(res)
+	assert.Equal(s.T(), err, fmt.Errorf("deploymentId does not match current leader"))
 }
 
 func TestGcpTestSuite(t *testing.T) {

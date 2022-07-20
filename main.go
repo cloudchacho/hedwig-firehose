@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
+	"github.com/cloudchacho/hedwig-firehose/shared"
 )
 
 const defaultVisibilityTimeoutS = time.Second * 20
@@ -59,6 +60,7 @@ type StorageBackend interface {
 	DeleteFile(ctx context.Context, bucket string, location string) error
 	GetNodeId(ctx context.Context) string
 	GetDeploymentId(ctx context.Context) string
+	// WriteLeaderFile should return LeaderFileExists error if the leader file already exists
 	WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error
 }
 
@@ -274,38 +276,45 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 	}
 }
 
-func (fp *Firehose) isLeader(ctx context.Context) (*bool, error) {
-	isLeader := true
+func (fp *Firehose) IsLeader(ctx context.Context) (*bool, error) {
+	leader := true
 	nodeId := fp.storageBackend.GetNodeId(ctx)
 	deploymentId := fp.storageBackend.GetDeploymentId(ctx)
 	if nodeId == "" || deploymentId == "" {
 		panic("nodeId or deploymentId can not be determined")
 	}
 	leaderWriteErr := fp.storageBackend.WriteLeaderFile(ctx, fp.processSettings.MetadataBucket, nodeId, deploymentId)
-	// leader.json already exists (probably have to check specific error?)
-	if leaderWriteErr != nil {
+
+	_, ok := leaderWriteErr.(shared.LeaderFileExists); if ok {
 		r, err := fp.storageBackend.CreateReader(ctx, fp.processSettings.MetadataBucket, "leader.json")
-		defer r.Close()
 		if err != nil {
-			// should this retry the read? feel like this shouldn't error
+			fmt.Println(err)
+			return nil, err
 		}
 		data, err := ioutil.ReadAll(r)
 		if err != nil {
 			return nil, err
 		}
 		var result map[string]interface{}
-		json.Unmarshal(data, &result)
-		if result["nodeId"] == nodeId && result["deploymentId"] == deploymentId {
-			return &isLeader, nil
+		err = json.Unmarshal(data, &result)
+		if err != nil {
+			return nil, err
 		}
 
-		if result["deploymentId"] == deploymentId {
+		if result["deploymentId"] != deploymentId {
 			return nil, fmt.Errorf("deploymentId does not match current leader")
 		}
-		isLeader = false
-		return &isLeader, nil
+		if result["nodeId"] == nodeId && result["deploymentId"] == deploymentId {
+			return &leader, nil
+		}
+
+		leader = false
+		return &leader, nil
+	} else if leaderWriteErr == nil {
+		return &leader, nil
+	} else {
+		return nil, leaderWriteErr
 	}
-	return &isLeader, nil
 }
 
 // RunFirehose starts a Firehose running in leader of follower mode
@@ -313,7 +322,7 @@ func (fp *Firehose) RunFirehose(ctx context.Context) {
 	// 1. on start up determine if leader or followerBackend
 	globalTimeout := 30
 	timeCheckingLeader := 0
-	var isLeader *bool
+	var leader *bool
 outer:
 	for {
 		select {
@@ -324,7 +333,7 @@ outer:
 			interval := 2
 			<-time.After(time.Second * time.Duration(interval))
 			var err error
-			isLeader, err = fp.isLeader(ctx)
+			leader, err = fp.IsLeader(ctx)
 			if err != nil {
 				timeCheckingLeader = timeCheckingLeader + interval
 				if timeCheckingLeader >= globalTimeout {
@@ -336,7 +345,7 @@ outer:
 			break outer
 		}
 	}
-	if *isLeader {
+	if *leader {
 		// 2. if leader call RunLeader
 		go fp.RunLeader(ctx)
 	} else {
