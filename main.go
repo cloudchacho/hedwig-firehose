@@ -352,7 +352,7 @@ outer:
 	} else {
 		// 3. else follower call RunFollower
 		err := fp.RunFollower(ctx)
-		if err != nil {
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
 			panic(err)
 		}
 	}

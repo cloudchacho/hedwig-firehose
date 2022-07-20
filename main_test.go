@@ -246,7 +246,24 @@ func (s *GcpTestSuite) TestFollowerPanic() {
 	_ = f.RunFollower(ctx)
 }
 
-func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
+func (s *GcpTestSuite) TestFirehoseInFollowerMode() {
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("{\"deploymentId\": \"deployment_1\", \"nodeId\": \"instance_2\", \"timestamp\": \"1658342551\"}"),
+		},
+	)
+	s.RunFirehoseFollowerIntegration()
+}
+
+func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 	var hedwigLogger hedwig.Logger
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
 	// maybe just user-created?
@@ -314,9 +331,7 @@ func (s *GcpTestSuite) TestFirehoseFollowerIntegration() {
 	defer wg.Wait()
 	go func() {
 		defer wg.Done()
-		err := f.RunFollower(ctx)
-		// should have errored due to ctx cancel
-		s.Require().NotNil(err)
+		f.RunFirehose(ctx)
 	}()
 
 outer:
@@ -373,7 +388,24 @@ outer:
 	cancel()
 }
 
-func (s *GcpTestSuite) TestFirehoseLeaderIntegration() {
+func (s *GcpTestSuite) TestFirehoseInLeaderMode() {
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("{\"deploymentId\": \"deployment_1\", \"nodeId\": \"instance_1\", \"timestamp\": \"1658342551\"}"),
+		},
+	)
+	s.RunFirehoseLeaderIntegration()
+}
+
+func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	hedwigLogger := hedwig.StdLogger{}
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
 	// maybe just user-created?
@@ -460,7 +492,7 @@ func (s *GcpTestSuite) TestFirehoseLeaderIntegration() {
 	defer wg.Wait()
 	go func() {
 		defer wg.Done()
-		f.RunLeader(ctx)
+		f.RunFirehose(ctx)
 	}()
 
 outer:
@@ -641,6 +673,48 @@ func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
 	res, err := f.IsLeader(ctx)
 	s.Require().Nil(res)
 	assert.Equal(s.T(), err, fmt.Errorf("deploymentId does not match current leader"))
+}
+
+func (s *GcpTestSuite) TestNotLeader() {
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("{\"deploymentId\": \"deployment_1\", \"nodeId\": \"instance_2\", \"timestamp\": \"1658342551\"}"),
+		},
+	)
+
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	res, err := f.IsLeader(ctx)
+	s.Require().Nil(err)
+	assert.Equal(s.T(), *res, false)
 }
 
 func TestGcpTestSuite(t *testing.T) {
