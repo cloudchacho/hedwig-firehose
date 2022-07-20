@@ -1,13 +1,13 @@
 package main
 
 import (
-	"os"
-	"io/ioutil"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -547,6 +547,7 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 	assert.Equal(s.T(), *res, true)
 
 	r, err := f.storageBackend.CreateReader(ctx, f.processSettings.MetadataBucket, "leader.json")
+	s.Require().Nil(err)
 	defer r.Close()
 	data, err := ioutil.ReadAll(r)
 	s.Require().Nil(err)

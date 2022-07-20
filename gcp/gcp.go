@@ -1,20 +1,20 @@
 package gcp
 
 import (
-	"os"
-	"errors"
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"time"
-	"encoding/json"
 
 	"cloud.google.com/go/storage"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/googleapi"
 	"github.com/cloudchacho/hedwig-firehose/shared"
+	"google.golang.org/api/googleapi"
+	"google.golang.org/api/iterator"
 )
 
 // This should satify interface for FirehoseBackend
@@ -105,9 +105,9 @@ func (b *Backend) GetDeploymentId(ctx context.Context) string {
 func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error {
 	w := b.GcsClient.Bucket(metadataBucket).Object("leader.json").If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
 	jsonStr, err := json.Marshal(map[string]string{
-		"timestamp": fmt.Sprint(time.Now().Unix()),
+		"timestamp":    fmt.Sprint(time.Now().Unix()),
 		"deploymentId": deploymentId,
-		"nodeId": nodeId,
+		"nodeId":       nodeId,
 	})
 	if err != nil {
 		return err

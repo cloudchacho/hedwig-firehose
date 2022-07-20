@@ -2,17 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"sort"
 	"sync"
 	"time"
-	"encoding/json"
 
+	"github.com/cloudchacho/hedwig-firehose/shared"
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
-	"github.com/cloudchacho/hedwig-firehose/shared"
 )
 
 const defaultVisibilityTimeoutS = time.Second * 20
@@ -285,7 +285,8 @@ func (fp *Firehose) IsLeader(ctx context.Context) (*bool, error) {
 	}
 	leaderWriteErr := fp.storageBackend.WriteLeaderFile(ctx, fp.processSettings.MetadataBucket, nodeId, deploymentId)
 
-	_, ok := leaderWriteErr.(shared.LeaderFileExists); if ok {
+	_, ok := leaderWriteErr.(shared.LeaderFileExists)
+	if ok {
 		r, err := fp.storageBackend.CreateReader(ctx, fp.processSettings.MetadataBucket, "leader.json")
 		if err != nil {
 			fmt.Println(err)

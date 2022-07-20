@@ -1,10 +1,10 @@
 package gcp_test
 
 import (
-	"os"
 	"context"
-	"testing"
 	"encoding/json"
+	"os"
+	"testing"
 
 	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-firehose/gcp"
