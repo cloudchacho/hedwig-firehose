@@ -268,7 +268,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 		MajorVersion: 1,
 	}}
 	s3 := ProcessSettings{
-		MetadataBucket: "some-metadata-bucket",
+		MetadataBucket:     "some-metadata-bucket",
 		AcquireRoleTimeout: 5,
 	}
 	var s2 gcp.Settings
@@ -282,7 +282,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 	// set longer than global timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	assert.Panics(s.T(), func(){ f.RunFirehose(ctx) })
+	assert.Panics(s.T(), func() { f.RunFirehose(ctx) })
 }
 
 func (s *GcpTestSuite) TestFirehoseInFollowerMode() {
