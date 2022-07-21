@@ -246,6 +246,45 @@ func (s *GcpTestSuite) TestFollowerPanic() {
 	_ = f.RunFollower(ctx)
 }
 
+func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
+	instance := "instance_1"
+	deployment := "deployment_2"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("{\"deploymentId\": \"deployment_1\", \"nodeId\": \"instance_2\", \"timestamp\": \"1658342551\"}"),
+		},
+	)
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+		AcquireRoleTimeout: 5,
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	// set longer than global timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	assert.Panics(s.T(), func(){ f.RunFirehose(ctx) })
+}
+
 func (s *GcpTestSuite) TestFirehoseInFollowerMode() {
 	instance := "instance_1"
 	deployment := "deployment_1"

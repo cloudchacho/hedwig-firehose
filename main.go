@@ -32,6 +32,9 @@ type ProcessSettings struct {
 
 	// final bucket for firehose files
 	OutputBucket string
+
+	// timeout before determining if node is a leader panics
+	AcquireRoleTimeout int
 }
 
 type ReceivedMessage struct {
@@ -321,7 +324,7 @@ func (fp *Firehose) IsLeader(ctx context.Context) (*bool, error) {
 // RunFirehose starts a Firehose running in leader of follower mode
 func (fp *Firehose) RunFirehose(ctx context.Context) {
 	// 1. on start up determine if leader or followerBackend
-	globalTimeout := 30
+	globalTimeout := fp.processSettings.AcquireRoleTimeout
 	timeCheckingLeader := 0
 	var leader *bool
 outer:
