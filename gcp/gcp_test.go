@@ -2,6 +2,8 @@ package gcp_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"cloud.google.com/go/storage"
@@ -86,6 +88,144 @@ func (s *GcpTestSuite) TestUploadNotValidLocation() {
 	}
 	err := b.UploadFile(context.Background(), []byte("test"), "nonexistent-bucket", "some/object/test.txt")
 	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestListFilesPrefixErr() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	_, err := b.ListFilesPrefix(context.Background(), "nonexistent-bucket", "!@#%$ ")
+	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestListFilesPrefix() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "some/object/file1.txt",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "some/object/file2.txt",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "someother/object/file2.txt",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+	fileNames, err := b.ListFilesPrefix(context.Background(), "some-bucket", "some/object")
+	assert.Nil(s.T(), err)
+	found := map[string]int{
+		"some/object/file.txt":  0,
+		"some/object/file1.txt": 0,
+		"some/object/file2.txt": 0,
+	}
+	expected := map[string]int{
+		"some/object/file.txt":  1,
+		"some/object/file1.txt": 1,
+		"some/object/file2.txt": 1,
+	}
+	for _, fileName := range fileNames {
+		found[fileName]++
+	}
+	assert.Equal(s.T(), found, expected)
+}
+
+func (s *GcpTestSuite) TestDeleteFile() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	ctx := context.Background()
+	err := b.DeleteFile(ctx, "some-bucket", "some/object/file.txt")
+	assert.Nil(s.T(), err)
+	_, err = s.client.Bucket("some-bucket").Object("some/object/file.txt").Attrs(ctx)
+	assert.Equal(s.T(), err, storage.ErrObjectNotExist)
+}
+
+func (s *GcpTestSuite) TestDeleteFileErr() {
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	ctx := context.Background()
+	err := b.DeleteFile(ctx, "some-bucket", "some/object/doesnotexist.txt")
+	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestGetNodeDeploymentId() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+
+	assert.Equal(s.T(), "", b.GetNodeId(ctx))
+	assert.Equal(s.T(), "", b.GetDeploymentId(ctx))
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	assert.Equal(s.T(), instance, b.GetNodeId(ctx))
+	assert.Equal(s.T(), deployment, b.GetDeploymentId(ctx))
+}
+
+func (s *GcpTestSuite) TestWriteLeaderFile() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	instance := "instance_1"
+	deployment := "deployment_1"
+
+	err := b.WriteLeaderFile(ctx, "some-bucket", instance, deployment)
+	assert.Nil(s.T(), err)
+
+	res, err := b.ReadFile(ctx, "some-bucket", "leader.json")
+	assert.Nil(s.T(), err)
+	var result map[string]interface{}
+	err = json.Unmarshal(res, &result)
+	assert.Nil(s.T(), err)
+	assert.Equal(s.T(), result["deploymentId"], deployment)
+	assert.Equal(s.T(), result["nodeId"], instance)
+}
+
+func (s *GcpTestSuite) TestWriteLeaderFileAlreadyExists() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+
+	err := b.WriteLeaderFile(ctx, "some-bucket", instance, deployment)
+	assert.NotNil(s.T(), err)
+
 }
 
 func (s *GcpTestSuite) TestNewBackend() {
