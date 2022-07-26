@@ -105,9 +105,10 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 					}
 				}
 			}
-			// start a new flushcron go routine, as this one is done
-			go fp.flushCron(ctx)
-			return
+			// start a new flushcron timer and reset writerMapping/errChannelMapping, as this one is done
+			writerMapping = make(map[hedwig.MessageTypeMajorVersion]io.WriteCloser)
+			errChannelMapping = make(map[hedwig.MessageTypeMajorVersion][]chan error)
+			timerCh = time.After(time.Duration(fp.processSettings.FlushAfter) * time.Second)
 		case messageAndChan := <-fp.messageCh:
 			message := messageAndChan.message
 			errCh := messageAndChan.errCh
@@ -254,8 +255,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 			}
 			wg.Wait()
 			// restart scrape interval and run leader again
-			go fp.RunLeader(ctx)
-			return
+			timerCh = time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 		case <-ctx.Done():
 			err := ctx.Err()
 			// dont return err if context stopped process
