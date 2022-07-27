@@ -289,6 +289,8 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 			// restart scrape interval and run leader again
 			timerCh = time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 		case <-ctx.Done():
+			// delete leader file on shutdown, on failure will have to manually delete
+			_ = fp.StorageBackend.DeleteFile(ctx, fp.processSettings.MetadataBucket, "leader.json")
 			err := ctx.Err()
 			// dont return err if context stopped process
 			if err != context.Canceled && err != context.DeadlineExceeded {

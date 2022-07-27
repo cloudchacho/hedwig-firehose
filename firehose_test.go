@@ -422,7 +422,7 @@ outer:
 			var lastTimestamp int64 = 0
 			for _, r := range res {
 				// assert timestamps are increasing
-				assert.Greater(s.T(), r.Metadata.Timestamp.Unix(), lastTimestamp)
+				assert.GreaterOrEqual(s.T(), r.Metadata.Timestamp.Unix(), lastTimestamp)
 				lastTimestamp = r.Metadata.Timestamp.Unix()
 				foundMetaData[r.Metadata.Headers["foo"]]++
 			}
@@ -448,6 +448,8 @@ func (s *GcpTestSuite) TestFirehoseInLeaderMode() {
 		},
 	)
 	s.RunFirehoseLeaderIntegration()
+	_, err := s.server.GetObject("some-metadata-bucket", "leader.json")
+	assert.Equal(s.T(), err.Error(), "object not found")
 }
 
 func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
@@ -621,7 +623,7 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 
 	res, err := f.IsLeader(ctx)
 	s.Require().Nil(err)
-	assert.Equal(s.T(), *res, true)
+	assert.Equal(s.T(), res, true)
 
 	r, err := f.StorageBackend.CreateReader(ctx, s3.MetadataBucket, "leader.json")
 	s.Require().Nil(err)
@@ -632,8 +634,8 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 	var result map[string]interface{}
 	err = json.Unmarshal(data, &result)
 	assert.Nil(s.T(), err)
-	assert.Equal(s.T(), result["deploymentId"], deployment)
-	assert.Equal(s.T(), result["nodeId"], instance)
+	assert.Equal(s.T(), result["DeploymentId"], deployment)
+	assert.Equal(s.T(), result["NodeId"], instance)
 }
 
 func (s *GcpTestSuite) TestIsLeaderMatchingNode() {
@@ -675,7 +677,7 @@ func (s *GcpTestSuite) TestIsLeaderMatchingNode() {
 
 	res, err := f.IsLeader(ctx)
 	s.Require().Nil(err)
-	assert.Equal(s.T(), *res, true)
+	assert.Equal(s.T(), res, true)
 }
 
 func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
@@ -716,7 +718,7 @@ func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
 	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
 
 	res, err := f.IsLeader(ctx)
-	s.Require().Nil(res)
+	assert.Equal(s.T(), res, false)
 	assert.Equal(s.T(), err, fmt.Errorf("deploymentId does not match current leader"))
 }
 
@@ -759,7 +761,7 @@ func (s *GcpTestSuite) TestNotLeader() {
 
 	res, err := f.IsLeader(ctx)
 	s.Require().Nil(err)
-	assert.Equal(s.T(), *res, false)
+	assert.Equal(s.T(), res, false)
 }
 
 func TestGcpTestSuite(t *testing.T) {

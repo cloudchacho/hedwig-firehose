@@ -201,8 +201,8 @@ func (s *GcpTestSuite) TestWriteLeaderFile() {
 	var result map[string]interface{}
 	err = json.Unmarshal(res, &result)
 	assert.Nil(s.T(), err)
-	assert.Equal(s.T(), result["deploymentId"], deployment)
-	assert.Equal(s.T(), result["nodeId"], instance)
+	assert.Equal(s.T(), result["DeploymentId"], deployment)
+	assert.Equal(s.T(), result["NodeId"], instance)
 }
 
 func (s *GcpTestSuite) TestWriteLeaderFileAlreadyExists() {
