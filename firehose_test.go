@@ -415,15 +415,10 @@ outer:
 			defer r.Close()
 			s.Require().NoError(err)
 			res, err := f.HedwigFirehose.Deserialize(r)
-			// check errors
 			s.Require().NoError(err)
 			assert.Equal(s.T(), 2, len(res))
 			foundMetaData := map[string]int{"bar": 0, "bar2": 0}
-			var lastTimestamp int64 = 0
 			for _, r := range res {
-				// assert timestamps are increasing
-				assert.GreaterOrEqual(s.T(), r.Metadata.Timestamp.Unix(), lastTimestamp)
-				lastTimestamp = r.Metadata.Timestamp.Unix()
 				foundMetaData[r.Metadata.Headers["foo"]]++
 			}
 			assert.Equal(s.T(), foundMetaData, map[string]int{"bar": 1, "bar2": 1})
