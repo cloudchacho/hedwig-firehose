@@ -4,7 +4,7 @@
 // 	protoc        v3.19.4
 // source: schema.proto
 
-package main
+package firehose
 
 import (
 	_ "github.com/cloudchacho/hedwig-go/protobuf"

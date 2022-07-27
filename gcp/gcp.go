@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/cloudchacho/hedwig-firehose/shared"
+	"github.com/cloudchacho/hedwig-firehose"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 )
@@ -104,10 +104,10 @@ func (b *Backend) GetDeploymentId(ctx context.Context) string {
 
 func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error {
 	w := b.GcsClient.Bucket(metadataBucket).Object("leader.json").If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
-	jsonStr, err := json.Marshal(map[string]string{
-		"timestamp":    fmt.Sprint(time.Now().Unix()),
-		"deploymentId": deploymentId,
-		"nodeId":       nodeId,
+	jsonStr, err := json.Marshal(firehose.LeaderFile{
+		Timestamp:    fmt.Sprint(time.Now().Unix()),
+		DeploymentId: deploymentId,
+		NodeId:       nodeId,
 	})
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, no
 	var e *googleapi.Error
 	if ok := errors.As(err, &e); ok {
 		if e.Code == 412 {
-			return shared.LeaderFileExists{}
+			return firehose.LeaderFileExists{}
 		}
 		return err
 	}

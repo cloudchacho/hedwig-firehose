@@ -1,4 +1,4 @@
-package main
+package firehose_test
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudchacho/hedwig-firehose"
 	firehoseGcp "github.com/cloudchacho/hedwig-firehose/gcp"
 	firehoseProtobuf "github.com/cloudchacho/hedwig-firehose/protobuf"
 	"github.com/cloudchacho/hedwig-go"
@@ -145,17 +146,17 @@ func (s *GcpTestSuite) TestNewFirehose() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	var s3 ProcessSettings
+	var s3 firehose.ProcessSettings
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(&storage.Client{})
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{
 		NumMessages:       2,
-		VisibilityTimeout: defaultVisibilityTimeoutS,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
 
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	assert.Equal(s.T(), nil, err)
 	assert.NotNil(s.T(), f)
 }
@@ -168,7 +169,7 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
 		OutputBucket:   "some-output-bucket",
@@ -182,10 +183,10 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
 	lr := hedwig.ListenRequest{
 		NumMessages:       2,
-		VisibilityTimeout: defaultVisibilityTimeoutS,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
-	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 
 	contextTimeout := time.Second * 1
@@ -193,7 +194,7 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 
 	defer cancel()
 	userId := "C_1234567890123456"
-	data := UserCreatedV1{UserId: &userId}
+	data := firehose.UserCreatedV1{UserId: &userId}
 	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar"}, &data, "myapp")
 	s.Require().NoError(err)
 	routing := map[hedwig.MessageTypeMajorVersion]string{
@@ -203,7 +204,7 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 		}: "dev-user-created-v1",
 	}
 	pubEncoderDecoder, err := protobuf.NewMessageEncoderDecoder(
-		[]proto.Message{&UserCreatedV1{}},
+		[]proto.Message{&firehose.UserCreatedV1{}},
 	)
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
@@ -227,13 +228,13 @@ func (s *GcpTestSuite) TestFollowerPanic() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	var s3 ProcessSettings
+	var s3 firehose.ProcessSettings
 	var s2 gcp.Settings
 	storageBackend := firehoseGcp.NewBackend(&storage.Client{})
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{
 		NumMessages:       2,
-		VisibilityTimeout: defaultVisibilityTimeoutS,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
 
@@ -241,7 +242,7 @@ func (s *GcpTestSuite) TestFollowerPanic() {
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
 	defer cancel()
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	_ = f.RunFollower(ctx)
 }
@@ -267,7 +268,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket:     "some-metadata-bucket",
 		AcquireRoleTimeout: 5,
 	}
@@ -276,7 +277,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	// set longer than global timeout
@@ -310,7 +311,7 @@ func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
 		OutputBucket:   "some-output-bucket",
@@ -324,15 +325,15 @@ func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
 	lr := hedwig.ListenRequest{
 		NumMessages:       2,
-		VisibilityTimeout: defaultVisibilityTimeoutS,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
-	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	// freeze time for test
 	parsed, _ := time.Parse("2006-01-02", "2022-10-15")
-	c := Clock{instant: parsed}
-	f.clock = &c
+	c := firehose.Clock{Instant: parsed}
+	f.Clock = &c
 
 	routing := map[hedwig.MessageTypeMajorVersion]string{
 		{
@@ -341,7 +342,7 @@ func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 		}: "dev-user-created-v1",
 	}
 	pubEncoderDecoder, err := protobuf.NewMessageEncoderDecoder(
-		[]proto.Message{&UserCreatedV1{}},
+		[]proto.Message{&firehose.UserCreatedV1{}},
 	)
 	s.Require().NoError(err)
 	publisher := hedwig.NewPublisher(backend, pubEncoderDecoder, routing)
@@ -352,14 +353,14 @@ func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 	defer cancel()
 
 	userId := "C_1234567890123456"
-	data := UserCreatedV1{UserId: &userId}
+	data := firehose.UserCreatedV1{UserId: &userId}
 	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar"}, &data, "myapp")
 	s.Require().NoError(err)
 	_, err = publisher.Publish(ctx, message)
 	s.Require().NoError(err)
 
 	userId2 := "C_9012345678901234"
-	data2 := UserCreatedV1{UserId: &userId2}
+	data2 := firehose.UserCreatedV1{UserId: &userId2}
 	message2, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar2"}, &data2, "myapp")
 	s.Require().NoError(err)
 	_, err = publisher.Publish(ctx, message2)
@@ -385,10 +386,10 @@ outer:
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
-			r, err := f.storageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			r, err := f.StorageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
 			defer r.Close()
 			s.Require().NoError(err)
-			_, err = f.hedwigFirehose.Deserialize(r)
+			_, err = f.HedwigFirehose.Deserialize(r)
 			// keep trying if file can not be deserialized
 			if err != nil {
 				continue
@@ -410,10 +411,10 @@ outer:
 		// check that file under message folder
 		if attrs.Name == "user-created/1/2022/10/15/1665792000" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
-			r, err := f.storageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
+			r, err := f.StorageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
 			defer r.Close()
 			s.Require().NoError(err)
-			res, err := f.hedwigFirehose.Deserialize(r)
+			res, err := f.HedwigFirehose.Deserialize(r)
 			// check errors
 			s.Require().NoError(err)
 			assert.Equal(s.T(), 2, len(res))
@@ -457,7 +458,7 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 		StagingBucket:  "some-staging-bucket",
 		OutputBucket:   "some-output-bucket",
@@ -472,38 +473,38 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	encoderDecoder := firehoseProtobuf.NewFirehoseEncodeDecoder(msgTypeUrls)
 	lr := hedwig.ListenRequest{
 		NumMessages:       2,
-		VisibilityTimeout: defaultVisibilityTimeoutS,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
-	f, err := NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	// freeze time for test
 	parsed, _ := time.Parse("2006-01-02", "2022-10-16")
-	c := Clock{instant: parsed}
-	f.clock = &c
+	c := firehose.Clock{Instant: parsed}
+	f.Clock = &c
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 	defer cancel()
 
 	userId := "C_1234567890123456"
-	data := UserCreatedV1{UserId: &userId}
+	data := firehose.UserCreatedV1{UserId: &userId}
 	mData, err := proto.Marshal(&data)
 	s.Require().NoError(err)
 	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar"}, mData, "myapp")
 	s.Require().NoError(err)
 
 	userId2 := "C_9012345678901234"
-	data2 := UserCreatedV1{UserId: &userId2}
+	data2 := firehose.UserCreatedV1{UserId: &userId2}
 	mData2, err := proto.Marshal(&data2)
 	s.Require().NoError(err)
 	// sleep for 1 sec to get timestamp 1 second later
 	<-time.After(time.Second * 1)
 	message2, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar2"}, mData2, "myapp")
 	s.Require().NoError(err)
-	sm, err := f.hedwigFirehose.Serialize(message)
+	sm, err := f.HedwigFirehose.Serialize(message)
 	s.Require().NoError(err)
-	sm2, err := f.hedwigFirehose.Serialize(message2)
+	sm2, err := f.HedwigFirehose.Serialize(message2)
 	s.Require().NoError(err)
 	smL := len(sm)
 	sm2L := len(sm2)
@@ -569,10 +570,10 @@ outer:
 		// check that file under message folder
 		if attrs.Name == "user-created/1/2022/10/16/user-created-1-1665878400.gz" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
-			r, err := f.storageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
+			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			defer r.Close()
 			s.Require().NoError(err)
-			res, err := f.hedwigFirehose.Deserialize(r)
+			res, err := f.HedwigFirehose.Deserialize(r)
 			// check errors
 			s.Require().NoError(err)
 			assert.Equal(s.T(), 2, len(res))
@@ -599,7 +600,7 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 	}
 	var s2 gcp.Settings
@@ -607,7 +608,7 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -622,7 +623,7 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 	s.Require().Nil(err)
 	assert.Equal(s.T(), *res, true)
 
-	r, err := f.storageBackend.CreateReader(ctx, f.processSettings.MetadataBucket, "leader.json")
+	r, err := f.StorageBackend.CreateReader(ctx, s3.MetadataBucket, "leader.json")
 	s.Require().Nil(err)
 	defer r.Close()
 	data, err := ioutil.ReadAll(r)
@@ -653,7 +654,7 @@ func (s *GcpTestSuite) TestIsLeaderMatchingNode() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 	}
 	var s2 gcp.Settings
@@ -661,7 +662,7 @@ func (s *GcpTestSuite) TestIsLeaderMatchingNode() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -695,7 +696,7 @@ func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 	}
 	var s2 gcp.Settings
@@ -703,7 +704,7 @@ func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -737,7 +738,7 @@ func (s *GcpTestSuite) TestNotLeader() {
 		MessageType:  "user-created",
 		MajorVersion: 1,
 	}}
-	s3 := ProcessSettings{
+	s3 := firehose.ProcessSettings{
 		MetadataBucket: "some-metadata-bucket",
 	}
 	var s2 gcp.Settings
@@ -745,7 +746,7 @@ func (s *GcpTestSuite) TestNotLeader() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
