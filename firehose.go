@@ -277,7 +277,6 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 					err := fp.moveFilesToOutputBucket(ctx, mtmv, currentTime)
 					// just logs errors but will retry on next run of leader
 					if err != nil {
-						fmt.Println(err.Error())
 						fp.logger.Error(ctx, err, "moving files failed",
 							"messageType", mtmv.MessageType,
 							"messageVersion", fmt.Sprint(mtmv.MajorVersion),
@@ -290,8 +289,11 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 			timerCh = time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 		case <-ctx.Done():
 			// delete leader file on shutdown, on failure will have to manually delete
-			_ = fp.StorageBackend.DeleteFile(ctx, fp.processSettings.MetadataBucket, "leader.json")
-			err := ctx.Err()
+			err := fp.StorageBackend.DeleteFile(ctx, fp.processSettings.MetadataBucket, "leader.json")
+			if err != nil {
+				fp.logger.Error(ctx, err, "deleting leader file on shutdown failed")
+			}
+			err = ctx.Err()
 			// dont return err if context stopped process
 			if err != context.Canceled && err != context.DeadlineExceeded {
 				fp.logger.Error(ctx, err, "RunLeader failed",
