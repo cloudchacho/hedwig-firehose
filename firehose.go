@@ -1,9 +1,11 @@
-package main
+package firehose
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"sort"
 	"sync"
 	"time"
@@ -12,7 +14,7 @@ import (
 	"github.com/cloudchacho/hedwig-go/gcp"
 )
 
-const defaultVisibilityTimeoutS = time.Second * 20
+const DefaultVisibilityTimeoutS = time.Second * 20
 
 type ProcessSettings struct {
 	// interval when leader moves files to final bucket
@@ -29,6 +31,9 @@ type ProcessSettings struct {
 
 	// final bucket for firehose files
 	OutputBucket string
+
+	// timeout before determining if node is a leader panics
+	AcquireRoleTimeout int
 }
 
 type ReceivedMessage struct {
@@ -48,44 +53,71 @@ func (t byTimestamp) Less(i, j int) bool {
 	return t[i].Metadata.Timestamp.Unix() < t[j].Metadata.Timestamp.Unix()
 }
 
+type leaderFile struct {
+	Timestamp    string
+	DeploymentId string
+	NodeId       string
+}
+
+type LeaderFileExists struct{}
+
+func (e LeaderFileExists) Error() string {
+	return "Leader file already exists"
+}
+
 // StorageBackend is used for interacting with storage
 type StorageBackend interface {
+	// CreateWriter returns a writer for specified uploadlocation
 	CreateWriter(ctx context.Context, uploadBucket string, uploadLocation string) (io.WriteCloser, error)
+
+	// CreateReader returns a reader for specified uploadlocation
 	CreateReader(ctx context.Context, uploadBucket string, uploadLocation string) (io.ReadCloser, error)
+
 	// ListFilesPrefix should list all objects with a certain prefix
 	ListFilesPrefix(ctx context.Context, bucket string, prefix string) ([]string, error)
+
+	// DeleteFile deletes the object at the specified location
 	DeleteFile(ctx context.Context, bucket string, location string) error
+
+	// GetNodeId returns the id of the node/machine running the firehose process
+	GetNodeId(ctx context.Context) string
+
+	// GetDeploymentId returns the id of the deployment version of firehose currently running
+	GetDeploymentId(ctx context.Context) string
+
+	// WriteLeaderFile should return LeaderFileExists error if the leader file already exists fileContents should be json string of leaderFile
+	WriteLeaderFile(ctx context.Context, metadataBucket string, fileContents []byte) error
 }
 
 type Clock struct {
-	instant time.Time
+	Instant time.Time
 }
 
 func (this *Clock) Now() time.Time {
 	if this == nil {
 		return time.Now()
 	}
-	return this.instant
+	return this.Instant
 }
 
 type Firehose struct {
 	processSettings ProcessSettings
-	storageBackend  StorageBackend
+	StorageBackend  StorageBackend
 	hedwigConsumer  *hedwig.QueueConsumer
 	logger          hedwig.Logger
 	registry        hedwig.CallbackRegistry
-	hedwigFirehose  *hedwig.Firehose
+	HedwigFirehose  *hedwig.Firehose
 	flushLock       sync.Mutex
 	flushCh         chan error
 	messageCh       chan ReceivedMessage
 	listenRequest   hedwig.ListenRequest
-	clock           *Clock
+	Clock           *Clock
 }
 
 func (fp *Firehose) flushCron(ctx context.Context) {
 	errChannelMapping := make(map[hedwig.MessageTypeMajorVersion][]chan error)
 	writerMapping := make(map[hedwig.MessageTypeMajorVersion]io.WriteCloser)
-	currentTime := fp.clock.Now()
+	currentTime := fp.Clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.FlushAfter) * time.Second)
 	// go through all msgs and write to msgtype folder
 	for {
@@ -120,7 +152,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			if _, ok := writerMapping[key]; !ok {
 				// TODO: use node id in this path
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
-				writer, err := fp.storageBackend.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
+				writer, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
 					errCh <- err
 					continue
@@ -128,7 +160,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 				writerMapping[key] = writer
 			}
 			msgTypeWriter := writerMapping[key]
-			payload, err := fp.hedwigFirehose.Serialize(message)
+			payload, err := fp.HedwigFirehose.Serialize(message)
 			if err != nil {
 				errCh <- err
 				continue
@@ -180,18 +212,18 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.MessageTypeMajorVersion, currTime time.Time) error {
 	// read from staging
 	filePathPrefix := fmt.Sprintf("%s/%s", mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion))
-	fileNames, err := fp.storageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
+	fileNames, err := fp.StorageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
 	if err != nil {
 		return err
 	}
 	var msgs byTimestamp
 	for _, fileName := range fileNames {
-		r, err := fp.storageBackend.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
+		r, err := fp.StorageBackend.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
 		defer r.Close()
 		if err != nil {
 			return err
 		}
-		res, err := fp.hedwigFirehose.Deserialize(r)
+		res, err := fp.HedwigFirehose.Deserialize(r)
 		if err != nil {
 			return err
 		}
@@ -203,12 +235,12 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.Mes
 		// sort by timestamp
 		sort.Sort(msgs)
 		uploadLocation := fmt.Sprintf("%s/%s/%s/%s-%s-%s.gz", mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion), currTime.Format("2006/1/2"), mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion), fmt.Sprint(currTime.Unix()))
-		r, err := fp.storageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
+		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {
 			return err
 		}
 		for _, msg := range msgs {
-			payload, err := fp.hedwigFirehose.Serialize(msg)
+			payload, err := fp.HedwigFirehose.Serialize(msg)
 			if err != nil {
 				return err
 			}
@@ -224,14 +256,14 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.Mes
 		// delete files when written to final output path
 		for _, fileName := range fileNames {
 			// ignore errors when deleting, picked up again on next run
-			_ = fp.storageBackend.DeleteFile(ctx, fp.processSettings.StagingBucket, fileName)
+			_ = fp.StorageBackend.DeleteFile(ctx, fp.processSettings.StagingBucket, fileName)
 		}
 	}
 	return nil
 }
 
 func (fp *Firehose) RunLeader(ctx context.Context) {
-	currentTime := fp.clock.Now()
+	currentTime := fp.Clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 	// go through all msgs and write to msgtype folder
 	for {
@@ -245,7 +277,6 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 					err := fp.moveFilesToOutputBucket(ctx, mtmv, currentTime)
 					// just logs errors but will retry on next run of leader
 					if err != nil {
-						fmt.Println(err.Error())
 						fp.logger.Error(ctx, err, "moving files failed",
 							"messageType", mtmv.MessageType,
 							"messageVersion", fmt.Sprint(mtmv.MajorVersion),
@@ -257,7 +288,12 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 			// restart scrape interval and run leader again
 			timerCh = time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 		case <-ctx.Done():
-			err := ctx.Err()
+			// delete leader file on shutdown, on failure will have to manually delete
+			err := fp.StorageBackend.DeleteFile(ctx, fp.processSettings.MetadataBucket, "leader.json")
+			if err != nil {
+				fp.logger.Error(ctx, err, "deleting leader file on shutdown failed")
+			}
+			err = ctx.Err()
 			// dont return err if context stopped process
 			if err != context.Canceled && err != context.DeadlineExceeded {
 				fp.logger.Error(ctx, err, "RunLeader failed",
@@ -269,11 +305,92 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 	}
 }
 
-// RunFirehose starts a Firehose running in leader of follower mode
-func (f *Firehose) RunFirehose() {
+func (fp *Firehose) IsLeader(ctx context.Context) (bool, error) {
+	nodeId := fp.StorageBackend.GetNodeId(ctx)
+	deploymentId := fp.StorageBackend.GetDeploymentId(ctx)
+	if nodeId == "" || deploymentId == "" {
+		panic("nodeId or deploymentId can not be determined")
+	}
+	jsonStr, err := json.Marshal(leaderFile{
+		Timestamp:    fmt.Sprint(fp.Clock.Now().Unix()),
+		DeploymentId: deploymentId,
+		NodeId:       nodeId,
+	})
+	if err != nil {
+		return false, err
+	}
+	leaderWriteErr := fp.StorageBackend.WriteLeaderFile(ctx, fp.processSettings.MetadataBucket, jsonStr)
+
+	if leaderWriteErr == nil {
+		return true, nil
+	}
+	_, ok := leaderWriteErr.(LeaderFileExists)
+	if ok {
+		r, err := fp.StorageBackend.CreateReader(ctx, fp.processSettings.MetadataBucket, "leader.json")
+		if err != nil {
+			return false, err
+		}
+		data, err := ioutil.ReadAll(r)
+		if err != nil {
+			return false, err
+		}
+		var result leaderFile
+		err = json.Unmarshal(data, &result)
+		if err != nil {
+			return false, err
+		}
+
+		if result.DeploymentId != deploymentId {
+			return false, fmt.Errorf("deploymentId does not match current leader")
+		}
+		if result.NodeId == nodeId && result.DeploymentId == deploymentId {
+			return true, nil
+		}
+
+		return false, nil
+	} else {
+		return false, leaderWriteErr
+	}
+}
+
+// RunFirehose starts a Firehose running in leader or follower mode
+func (fp *Firehose) RunFirehose(ctx context.Context) {
 	// 1. on start up determine if leader or followerBackend
-	// 2. if leader call RunLeader
-	// 3. else follower call RunFollower
+	globalTimeout := fp.processSettings.AcquireRoleTimeout
+	timeCheckingLeader := 0
+	leader := false
+outer:
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// poll for valid isLeader every 2 seconds
+			interval := 2
+			<-time.After(time.Second * time.Duration(interval))
+			var err error
+			leader, err = fp.IsLeader(ctx)
+			if err != nil {
+				timeCheckingLeader = timeCheckingLeader + interval
+				if timeCheckingLeader >= globalTimeout {
+					panic("failed to read leader file or deploymentId did not match")
+				}
+				// retry if error reading leader file
+				continue
+			}
+			break outer
+		}
+	}
+	if leader {
+		// 2. if leader call RunLeader
+		fp.RunLeader(ctx)
+	} else {
+		// 3. else follower call RunFollower
+		err := fp.RunFollower(ctx)
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			panic(err)
+		}
+	}
 }
 
 func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
@@ -282,8 +399,8 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.E
 	hedwigFirehose := hedwig.NewFirehose(encoderDecoder, encoderDecoder)
 	f := &Firehose{
 		processSettings: processSettings,
-		storageBackend:  storageBackend,
-		hedwigFirehose:  hedwigFirehose,
+		StorageBackend:  storageBackend,
+		HedwigFirehose:  hedwigFirehose,
 		logger:          logger,
 		messageCh:       make(chan ReceivedMessage),
 		listenRequest:   listenRequest,
@@ -295,8 +412,4 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.E
 	f.hedwigConsumer = hedwigConsumer
 	f.registry = registry
 	return f, nil
-}
-
-func main() {
-	fmt.Println("Hello World")
 }

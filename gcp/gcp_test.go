@@ -2,6 +2,8 @@ package gcp_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"cloud.google.com/go/storage"
@@ -163,6 +165,69 @@ func (s *GcpTestSuite) TestDeleteFileErr() {
 	ctx := context.Background()
 	err := b.DeleteFile(ctx, "some-bucket", "some/object/doesnotexist.txt")
 	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestGetNodeDeploymentId() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+
+	assert.Equal(s.T(), "", b.GetNodeId(ctx))
+	assert.Equal(s.T(), "", b.GetDeploymentId(ctx))
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	assert.Equal(s.T(), instance, b.GetNodeId(ctx))
+	assert.Equal(s.T(), deployment, b.GetDeploymentId(ctx))
+}
+
+func (s *GcpTestSuite) TestWriteLeaderFileErr() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	err := b.WriteLeaderFile(ctx, "nonexistent-bucket", []byte("\"{\"key\": \"value\"}\""))
+	assert.NotNil(s.T(), err)
+}
+
+func (s *GcpTestSuite) TestWriteLeaderFile() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	err := b.WriteLeaderFile(ctx, "some-bucket", []byte("{\"key\": \"value\"}"))
+	assert.Nil(s.T(), err)
+
+	res, err := b.ReadFile(ctx, "some-bucket", "leader.json")
+	assert.Nil(s.T(), err)
+	var result map[string]interface{}
+	err = json.Unmarshal(res, &result)
+	assert.Nil(s.T(), err)
+	assert.Equal(s.T(), result["key"], "value")
+}
+
+func (s *GcpTestSuite) TestWriteLeaderFileAlreadyExists() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("inside the file"),
+		},
+	)
+
+	err := b.WriteLeaderFile(ctx, "some-bucket", []byte("{\"key\": \"value\"}"))
+	assert.NotNil(s.T(), err)
+
 }
 
 func (s *GcpTestSuite) TestNewBackend() {

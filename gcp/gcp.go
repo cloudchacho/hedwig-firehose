@@ -3,12 +3,16 @@ package gcp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/cloudchacho/hedwig-firehose"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 )
 
@@ -87,6 +91,31 @@ func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation 
 		return nil, fmt.Errorf("ioutil.ReadAll: %v", err)
 	}
 	return data, nil
+}
+
+func (b *Backend) GetNodeId(ctx context.Context) string {
+	return os.Getenv("GAE_INSTANCE")
+}
+
+func (b *Backend) GetDeploymentId(ctx context.Context) string {
+	return os.Getenv("GAE_DEPLOYMENT_ID")
+}
+
+func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, fileContents []byte) error {
+	w := b.GcsClient.Bucket(metadataBucket).Object("leader.json").If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
+	_, err := w.Write(fileContents)
+	if err != nil {
+		return err
+	}
+	err = w.Close()
+	var e *googleapi.Error
+	if ok := errors.As(err, &e); ok {
+		if e.Code == 412 {
+			return firehose.LeaderFileExists{}
+		}
+		return err
+	}
+	return nil
 }
 
 // NewBackend creates a Firehose on GCP
