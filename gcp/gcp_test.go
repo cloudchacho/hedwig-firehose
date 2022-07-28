@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"cloud.google.com/go/storage"
-	"github.com/cloudchacho/hedwig-firehose"
 	"github.com/cloudchacho/hedwig-firehose/gcp"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 	"github.com/stretchr/testify/assert"
@@ -191,15 +190,7 @@ func (s *GcpTestSuite) TestWriteLeaderFileErr() {
 	b := gcp.Backend{
 		GcsClient: s.client,
 	}
-	instance := "instance_1"
-	deployment := "deployment_1"
-
-	jsonStr, _ := json.Marshal(firehose.LeaderFile{
-		Timestamp:    "1659042621",
-		DeploymentId: deployment,
-		NodeId:       instance,
-	})
-	err := b.WriteLeaderFile(ctx, "nonexistent-bucket", jsonStr)
+	err := b.WriteLeaderFile(ctx, "nonexistent-bucket", []byte("\"{\"key\": \"value\"}\""))
 	assert.NotNil(s.T(), err)
 }
 
@@ -208,15 +199,7 @@ func (s *GcpTestSuite) TestWriteLeaderFile() {
 	b := gcp.Backend{
 		GcsClient: s.client,
 	}
-	instance := "instance_1"
-	deployment := "deployment_1"
-
-	jsonStr, _ := json.Marshal(firehose.LeaderFile{
-		Timestamp:    "1659042621",
-		DeploymentId: deployment,
-		NodeId:       instance,
-	})
-	err := b.WriteLeaderFile(ctx, "some-bucket", jsonStr)
+	err := b.WriteLeaderFile(ctx, "some-bucket", []byte("{\"key\": \"value\"}"))
 	assert.Nil(s.T(), err)
 
 	res, err := b.ReadFile(ctx, "some-bucket", "leader.json")
@@ -224,8 +207,7 @@ func (s *GcpTestSuite) TestWriteLeaderFile() {
 	var result map[string]interface{}
 	err = json.Unmarshal(res, &result)
 	assert.Nil(s.T(), err)
-	assert.Equal(s.T(), result["DeploymentId"], deployment)
-	assert.Equal(s.T(), result["NodeId"], instance)
+	assert.Equal(s.T(), result["key"], "value")
 }
 
 func (s *GcpTestSuite) TestWriteLeaderFileAlreadyExists() {
@@ -243,15 +225,7 @@ func (s *GcpTestSuite) TestWriteLeaderFileAlreadyExists() {
 		},
 	)
 
-	instance := "instance_1"
-	deployment := "deployment_1"
-	jsonStr, _ := json.Marshal(firehose.LeaderFile{
-		Timestamp:    "1659042621",
-		DeploymentId: instance,
-		NodeId:       deployment,
-	})
-
-	err := b.WriteLeaderFile(ctx, "some-bucket", jsonStr)
+	err := b.WriteLeaderFile(ctx, "some-bucket", []byte("{\"key\": \"value\"}"))
 	assert.NotNil(s.T(), err)
 
 }

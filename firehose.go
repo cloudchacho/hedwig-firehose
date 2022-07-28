@@ -53,7 +53,7 @@ func (t byTimestamp) Less(i, j int) bool {
 	return t[i].Metadata.Timestamp.Unix() < t[j].Metadata.Timestamp.Unix()
 }
 
-type LeaderFile struct {
+type leaderFile struct {
 	Timestamp    string
 	DeploymentId string
 	NodeId       string
@@ -85,7 +85,7 @@ type StorageBackend interface {
 	// GetDeploymentId returns the id of the deployment version of firehose currently running
 	GetDeploymentId(ctx context.Context) string
 
-	// WriteLeaderFile should return LeaderFileExists error if the leader file already exists
+	// WriteLeaderFile should return LeaderFileExists error if the leader file already exists fileContents should be json string of leaderFile
 	WriteLeaderFile(ctx context.Context, metadataBucket string, fileContents []byte) error
 }
 
@@ -311,7 +311,7 @@ func (fp *Firehose) IsLeader(ctx context.Context) (bool, error) {
 	if nodeId == "" || deploymentId == "" {
 		panic("nodeId or deploymentId can not be determined")
 	}
-	jsonStr, err := json.Marshal(LeaderFile{
+	jsonStr, err := json.Marshal(leaderFile{
 		Timestamp:    fmt.Sprint(fp.Clock.Now().Unix()),
 		DeploymentId: deploymentId,
 		NodeId:       nodeId,
@@ -334,7 +334,7 @@ func (fp *Firehose) IsLeader(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		var result LeaderFile
+		var result leaderFile
 		err = json.Unmarshal(data, &result)
 		if err != nil {
 			return false, err
