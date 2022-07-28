@@ -185,6 +185,18 @@ func (s *GcpTestSuite) TestGetNodeDeploymentId() {
 	assert.Equal(s.T(), deployment, b.GetDeploymentId(ctx))
 }
 
+func (s *GcpTestSuite) TestWriteLeaderFileErr() {
+	ctx := context.Background()
+	b := gcp.Backend{
+		GcsClient: s.client,
+	}
+	instance := "instance_1"
+	deployment := "deployment_1"
+
+	err := b.WriteLeaderFile(ctx, "nonexistent-bucket", instance, deployment)
+	assert.NotNil(s.T(), err)
+}
+
 func (s *GcpTestSuite) TestWriteLeaderFile() {
 	ctx := context.Background()
 	b := gcp.Backend{
