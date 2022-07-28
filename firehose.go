@@ -86,7 +86,7 @@ type StorageBackend interface {
 	GetDeploymentId(ctx context.Context) string
 
 	// WriteLeaderFile should return LeaderFileExists error if the leader file already exists
-	WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error
+	WriteLeaderFile(ctx context.Context, metadataBucket string, fileContents []byte) error
 }
 
 type Clock struct {
@@ -311,7 +311,15 @@ func (fp *Firehose) IsLeader(ctx context.Context) (bool, error) {
 	if nodeId == "" || deploymentId == "" {
 		panic("nodeId or deploymentId can not be determined")
 	}
-	leaderWriteErr := fp.StorageBackend.WriteLeaderFile(ctx, fp.processSettings.MetadataBucket, nodeId, deploymentId)
+	jsonStr, err := json.Marshal(LeaderFile{
+		Timestamp:    fmt.Sprint(fp.Clock.Now().Unix()),
+		DeploymentId: deploymentId,
+		NodeId:       nodeId,
+	})
+	if err != nil {
+		return false, err
+	}
+	leaderWriteErr := fp.StorageBackend.WriteLeaderFile(ctx, fp.processSettings.MetadataBucket, jsonStr)
 
 	if leaderWriteErr == nil {
 		return true, nil

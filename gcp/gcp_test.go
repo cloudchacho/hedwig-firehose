@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cloud.google.com/go/storage"
+	"github.com/cloudchacho/hedwig-firehose"
 	"github.com/cloudchacho/hedwig-firehose/gcp"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 	"github.com/stretchr/testify/assert"
@@ -193,7 +194,12 @@ func (s *GcpTestSuite) TestWriteLeaderFileErr() {
 	instance := "instance_1"
 	deployment := "deployment_1"
 
-	err := b.WriteLeaderFile(ctx, "nonexistent-bucket", instance, deployment)
+	jsonStr, _ := json.Marshal(firehose.LeaderFile{
+		Timestamp:    "1659042621",
+		DeploymentId: deployment,
+		NodeId:       instance,
+	})
+	err := b.WriteLeaderFile(ctx, "nonexistent-bucket", jsonStr)
 	assert.NotNil(s.T(), err)
 }
 
@@ -205,7 +211,12 @@ func (s *GcpTestSuite) TestWriteLeaderFile() {
 	instance := "instance_1"
 	deployment := "deployment_1"
 
-	err := b.WriteLeaderFile(ctx, "some-bucket", instance, deployment)
+	jsonStr, _ := json.Marshal(firehose.LeaderFile{
+		Timestamp:    "1659042621",
+		DeploymentId: deployment,
+		NodeId:       instance,
+	})
+	err := b.WriteLeaderFile(ctx, "some-bucket", jsonStr)
 	assert.Nil(s.T(), err)
 
 	res, err := b.ReadFile(ctx, "some-bucket", "leader.json")
@@ -234,8 +245,13 @@ func (s *GcpTestSuite) TestWriteLeaderFileAlreadyExists() {
 
 	instance := "instance_1"
 	deployment := "deployment_1"
+	jsonStr, _ := json.Marshal(firehose.LeaderFile{
+		Timestamp:    "1659042621",
+		DeploymentId: instance,
+		NodeId:       deployment,
+	})
 
-	err := b.WriteLeaderFile(ctx, "some-bucket", instance, deployment)
+	err := b.WriteLeaderFile(ctx, "some-bucket", jsonStr)
 	assert.NotNil(s.T(), err)
 
 }

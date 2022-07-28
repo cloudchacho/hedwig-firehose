@@ -3,7 +3,6 @@ package gcp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -102,17 +101,9 @@ func (b *Backend) GetDeploymentId(ctx context.Context) string {
 	return os.Getenv("GAE_DEPLOYMENT_ID")
 }
 
-func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, nodeId string, deploymentId string) error {
+func (b *Backend) WriteLeaderFile(ctx context.Context, metadataBucket string, fileContents []byte) error {
 	w := b.GcsClient.Bucket(metadataBucket).Object("leader.json").If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
-	jsonStr, err := json.Marshal(firehose.LeaderFile{
-		Timestamp:    fmt.Sprint(time.Now().Unix()),
-		DeploymentId: deploymentId,
-		NodeId:       nodeId,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(jsonStr)
+	_, err := w.Write(fileContents)
 	if err != nil {
 		return err
 	}
