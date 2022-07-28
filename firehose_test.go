@@ -589,6 +589,81 @@ outer:
 	cancel()
 }
 
+func (s *GcpTestSuite) TestIsLeaderFileBadFormat() {
+	s.server.CreateObject(
+		fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "some-metadata-bucket",
+				Name:       "leader.json",
+			},
+			Content: []byte("not a json string"),
+		},
+	)
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := firehose.ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	instance := "instance_1"
+	deployment := "deployment_1"
+	os.Setenv("GAE_INSTANCE", instance)
+	os.Setenv("GAE_DEPLOYMENT_ID", deployment)
+
+	res, err := f.IsLeader(ctx)
+	assert.Equal(s.T(), res, false)
+	assert.Equal(s.T(), err.Error(), "invalid character 'o' in literal null (expecting 'u')")
+}
+
+func (s *GcpTestSuite) TestIsLeaderNoDeploymentId() {
+	defer func() {
+		if r := recover(); r == nil {
+			s.T().Errorf("The code did not panic")
+		}
+	}()
+
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	s3 := firehose.ProcessSettings{
+		MetadataBucket: "some-metadata-bucket",
+	}
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(s.storageClient)
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{}
+
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().Nil(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	os.Setenv("GAE_INSTANCE", "")
+	os.Setenv("GAE_DEPLOYMENT_ID", "")
+
+	_, _ = f.IsLeader(ctx)
+}
+
 func (s *GcpTestSuite) TestIsLeaderNoFile() {
 	gcpSettings := gcp.Settings{}
 	var hedwigLogger hedwig.Logger
