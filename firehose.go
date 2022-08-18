@@ -289,7 +289,9 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 			timerCh = time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 		case <-ctx.Done():
 			// delete leader file on shutdown, on failure will have to manually delete
-			err := fp.StorageBackend.DeleteFile(ctx, fp.processSettings.MetadataBucket, "leader.json")
+			// New context to delete without context being canceled
+			background := context.Background()
+			err := fp.StorageBackend.DeleteFile(background, fp.processSettings.MetadataBucket, "leader.json")
 			if err != nil {
 				fp.logger.Error(ctx, err, "deleting leader file on shutdown failed")
 			}
