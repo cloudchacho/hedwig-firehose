@@ -535,6 +535,9 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	go func() {
 		defer wg.Done()
 		f.RunFirehose(ctx)
+		// after ctx cancel, leader json should no longer exist
+		_, err = s.server.GetObject("some-metadata-bucket", "leader.json")
+		assert.NotNil(s.T(), err)
 	}()
 
 outer:
