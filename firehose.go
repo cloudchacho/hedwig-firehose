@@ -364,7 +364,7 @@ func (fp *Firehose) IsLeader(ctx context.Context) (bool, error) {
 }
 
 // RunFirehose starts a Firehose running in leader or follower mode
-func (fp *Firehose) RunFirehose(ctx context.Context) {
+func (fp *Firehose) RunFirehose(ctx context.Context) error {
 	// 1. on start up determine if leader or followerBackend
 	globalTimeout := fp.processSettings.AcquireRoleTimeout
 	timeCheckingLeader := 0
@@ -373,7 +373,7 @@ outer:
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
 			// poll for valid isLeader every 2 seconds
 			interval := 2
@@ -393,16 +393,10 @@ outer:
 	}
 	if leader {
 		// 2. if leader call RunLeader
-		err := fp.RunLeader(ctx)
-		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-			panic(err)
-		}
+		return fp.RunLeader(ctx)
 	} else {
 		// 3. else follower call RunFollower
-		err := fp.RunFollower(ctx)
-		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-			panic(err)
-		}
+		return fp.RunFollower(ctx)
 	}
 }
 
