@@ -283,7 +283,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 	// set longer than global timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	assert.Panics(s.T(), func() { f.RunFirehose(ctx) })
+	assert.Equal(s.T(), fmt.Errorf("failed to read leader file or deploymentId did not match"), f.RunFirehose(ctx))
 }
 
 func (s *GcpTestSuite) TestFirehoseInFollowerMode() {
@@ -371,7 +371,10 @@ func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 	defer wg.Wait()
 	go func() {
 		defer wg.Done()
-		f.RunFirehose(ctx)
+		err := f.RunFirehose(ctx)
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			s.T().FailNow()
+		}
 	}()
 
 outer:
@@ -534,7 +537,10 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	defer wg.Wait()
 	go func() {
 		defer wg.Done()
-		f.RunFirehose(ctx)
+		err := f.RunFirehose(ctx)
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			s.T().FailNow()
+		}
 		// after ctx cancel, leader json should no longer exist
 		_, err = s.server.GetObject("some-metadata-bucket", "leader.json")
 		assert.NotNil(s.T(), err)
