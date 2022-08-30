@@ -140,6 +140,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			// start a new flushcron timer and reset writerMapping/errChannelMapping, as this one is done
 			writerMapping = make(map[hedwig.MessageTypeMajorVersion]io.WriteCloser)
 			errChannelMapping = make(map[hedwig.MessageTypeMajorVersion][]chan error)
+			currentTime = fp.Clock.Now()
 			timerCh = time.After(time.Duration(fp.processSettings.FlushAfter) * time.Second)
 		case messageAndChan := <-fp.messageCh:
 			message := messageAndChan.message
@@ -173,7 +174,7 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			errChannelMapping[key] = append(errChannelMapping[key], errCh)
 		case <-ctx.Done():
 			// if ctx closes error all in flight messages
-			for key, _ := range writerMapping {
+			for key := range writerMapping {
 				errChannels := errChannelMapping[key]
 				err := ctx.Err()
 				for _, errCh := range errChannels {
@@ -206,6 +207,12 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 	}
 	// wait until message flushed into GCS file.
 	err := <-ch
+	if err != nil {
+		fp.logger.Error(ctx, err, "handleMessage Failed",
+			"messageType", message.Type,
+			"errString", err.Error(),
+		)
+	}
 	return err
 }
 
@@ -262,7 +269,7 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.Mes
 	return nil
 }
 
-func (fp *Firehose) RunLeader(ctx context.Context) {
+func (fp *Firehose) RunLeader(ctx context.Context) error {
 	currentTime := fp.Clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 	// go through all msgs and write to msgtype folder
@@ -270,7 +277,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 		select {
 		case <-timerCh:
 			wg := &sync.WaitGroup{}
-			for mtmv, _ := range fp.registry {
+			for mtmv := range fp.registry {
 				wg.Add(1)
 				go func(mtmv hedwig.MessageTypeMajorVersion) {
 					defer wg.Done()
@@ -286,6 +293,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 			}
 			wg.Wait()
 			// restart scrape interval and run leader again
+			currentTime = fp.Clock.Now()
 			timerCh = time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 		case <-ctx.Done():
 			// delete leader file on shutdown, on failure will have to manually delete
@@ -302,7 +310,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) {
 					"currentTime", currentTime.Unix(),
 				)
 			}
-			return
+			return err
 		}
 	}
 }
@@ -385,7 +393,10 @@ outer:
 	}
 	if leader {
 		// 2. if leader call RunLeader
-		fp.RunLeader(ctx)
+		err := fp.RunLeader(ctx)
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			panic(err)
+		}
 	} else {
 		// 3. else follower call RunFollower
 		err := fp.RunFollower(ctx)
