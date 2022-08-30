@@ -383,7 +383,7 @@ outer:
 			if err != nil {
 				timeCheckingLeader = timeCheckingLeader + interval
 				if timeCheckingLeader >= globalTimeout {
-					panic("failed to read leader file or deploymentId did not match")
+					return fmt.Errorf("failed to read leader file or deploymentId did not match")
 				}
 				// retry if error reading leader file
 				continue

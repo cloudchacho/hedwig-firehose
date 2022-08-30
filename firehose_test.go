@@ -283,7 +283,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 	// set longer than global timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	assert.Panics(s.T(), func() { f.RunFirehose(ctx) })
+	assert.Equal(s.T(), fmt.Errorf("failed to read leader file or deploymentId did not match"), f.RunFirehose(ctx))
 }
 
 func (s *GcpTestSuite) TestFirehoseInFollowerMode() {
