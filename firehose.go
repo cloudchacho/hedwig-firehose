@@ -36,6 +36,9 @@ type ProcessSettings struct {
 	AcquireRoleTimeout int
 }
 
+// MsgToFilePrefix outputs the fileprefix (should be one of fp.fileprefixes) in StagingBucket and OutputBucket for a given hedwig message
+type MsgToFilePrefix func(message *hedwig.Message) (string, error)
+
 type ReceivedMessage struct {
 	message *hedwig.Message
 	errCh   chan error
@@ -79,9 +82,6 @@ type StorageBackend interface {
 	// DeleteFile deletes the object at the specified location
 	DeleteFile(ctx context.Context, bucket string, location string) error
 
-	// GetSubName returns the subscription name from message
-	GetSubName(msg *hedwig.Message) string
-
 	// GetNodeId returns the id of the node/machine running the firehose process
 	GetNodeId(ctx context.Context) string
 
@@ -108,6 +108,7 @@ type Firehose struct {
 	StorageBackend  StorageBackend
 	hedwigConsumer  *hedwig.QueueConsumer
 	filePrefixes    []string
+	msgToFilePrefix MsgToFilePrefix
 	logger          hedwig.Logger
 	registry        hedwig.CallbackRegistry
 	HedwigFirehose  *hedwig.Firehose
@@ -148,7 +149,6 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			timerCh = time.After(time.Duration(fp.processSettings.FlushAfter) * time.Second)
 		case messageAndChan := <-fp.messageCh:
 			message := messageAndChan.message
-			subName := fp.StorageBackend.GetSubName(message)
 			errCh := messageAndChan.errCh
 			key := hedwig.MessageTypeMajorVersion{
 				MessageType:  message.Type,
@@ -157,6 +157,11 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			// if writer doesn't exist create in mapping
 			nodeId := fp.StorageBackend.GetNodeId(ctx)
 			if _, ok := writerMapping[key]; !ok {
+				subName, err := fp.msgToFilePrefix(message)
+				if err != nil {
+					errCh <- err
+					continue
+				}
 				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", subName, nodeId, currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
 				writer, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
@@ -404,7 +409,7 @@ outer:
 	}
 }
 
-func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, filePrefixes []string, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
+func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, filePrefixes []string, mtfp MsgToFilePrefix, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
 	registry := hedwig.CallbackRegistry{}
 
 	hedwigFirehose := hedwig.NewFirehose(encoderDecoder, encoderDecoder)
@@ -423,5 +428,6 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.E
 	f.hedwigConsumer = hedwigConsumer
 	f.registry = registry
 	f.filePrefixes = filePrefixes
+	f.msgToFilePrefix = mtfp
 	return f, nil
 }

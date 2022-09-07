@@ -12,8 +12,6 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-firehose"
-	"github.com/cloudchacho/hedwig-go"
-	"github.com/cloudchacho/hedwig-go/gcp"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 )
@@ -93,10 +91,6 @@ func (b *Backend) ReadFile(ctx context.Context, readBucket string, readLocation 
 		return nil, fmt.Errorf("ioutil.ReadAll: %v", err)
 	}
 	return data, nil
-}
-
-func (b *Backend) GetSubName(msg *hedwig.Message) string {
-	return msg.Metadata.ProviderMetadata.(gcp.Metadata).SubscriptionName
 }
 
 func (b *Backend) GetNodeId(ctx context.Context) string {
