@@ -220,6 +220,43 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 	_ = f.RunFollower(ctx)
 }
 
+func (s *GcpTestSuite) TestFollowerPanicBadMsgToFilePrefix() {
+	defer func() {
+		if r := recover(); r == nil {
+			s.T().Errorf("The code did not panic")
+		}
+	}()
+
+	badFunc := func(message *hedwig.Message) (string, error) {
+		return "not_a_file_prefix", nil
+	}
+
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	var s3 firehose.ProcessSettings
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(&storage.Client{})
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{
+		NumMessages:       2,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
+		NumConcurrency:    2,
+	}
+
+	contextTimeout := time.Second * 30
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+
+	defer cancel()
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, badFunc, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().NoError(err)
+	_ = f.RunFollower(ctx)
+}
+
 func (s *GcpTestSuite) TestFollowerPanic() {
 	defer func() {
 		if r := recover(); r == nil {

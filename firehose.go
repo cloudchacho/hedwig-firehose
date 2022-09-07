@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
+	"golang.org/x/exp/slices"
 )
 
 const DefaultVisibilityTimeoutS = time.Second * 20
@@ -158,6 +159,9 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 			nodeId := fp.StorageBackend.GetNodeId(ctx)
 			if _, ok := writerMapping[key]; !ok {
 				subName, err := fp.msgToFilePrefix(message)
+				if !slices.Contains(fp.filePrefixes, subName) {
+					panic(fmt.Sprintf("output of msgToFilePrefix %s not in filePrefixes", subName))
+				}
 				if err != nil {
 					errCh <- err
 					continue
