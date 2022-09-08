@@ -36,9 +36,21 @@ type ProcessSettings struct {
 	AcquireRoleTimeout int
 }
 
+// MsgToFilePrefix outputs the fileprefix (should be one of fp.fileprefixes) in StagingBucket and OutputBucket for a given hedwig message
+type MsgToFilePrefix func(message *hedwig.Message) (string, error)
+
 type ReceivedMessage struct {
 	message *hedwig.Message
 	errCh   chan error
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
 }
 
 type byTimestamp []*hedwig.Message
@@ -104,6 +116,8 @@ type Firehose struct {
 	processSettings ProcessSettings
 	StorageBackend  StorageBackend
 	hedwigConsumer  *hedwig.QueueConsumer
+	filePrefixes    []string
+	msgToFilePrefix MsgToFilePrefix
 	logger          hedwig.Logger
 	registry        hedwig.CallbackRegistry
 	HedwigFirehose  *hedwig.Firehose
@@ -150,9 +164,17 @@ func (fp *Firehose) flushCron(ctx context.Context) {
 				MajorVersion: uint(message.DataSchemaVersion.Major()),
 			}
 			// if writer doesn't exist create in mapping
+			nodeId := fp.StorageBackend.GetNodeId(ctx)
 			if _, ok := writerMapping[key]; !ok {
-				// TODO: use node id in this path
-				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", key.MessageType, fmt.Sprint(key.MajorVersion), currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
+				subName, err := fp.msgToFilePrefix(message)
+				if !contains(fp.filePrefixes, subName) {
+					panic(fmt.Sprintf("output of msgToFilePrefix %s not in filePrefixes", subName))
+				}
+				if err != nil {
+					errCh <- err
+					continue
+				}
+				uploadLocation := fmt.Sprintf("%s/%s/%s/%s", subName, nodeId, currentTime.Format("2006/1/2"), fmt.Sprint(currentTime.Unix()))
 				writer, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.StagingBucket, uploadLocation)
 				if err != nil {
 					errCh <- err
@@ -216,9 +238,8 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 	return err
 }
 
-func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.MessageTypeMajorVersion, currTime time.Time) error {
+func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix string, currTime time.Time) error {
 	// read from staging
-	filePathPrefix := fmt.Sprintf("%s/%s", mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion))
 	fileNames, err := fp.StorageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
 	if err != nil {
 		return err
@@ -241,7 +262,7 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, mtmv hedwig.Mes
 	if len(msgs) > 0 {
 		// sort by timestamp
 		sort.Sort(msgs)
-		uploadLocation := fmt.Sprintf("%s/%s/%s/%s-%s-%s.gz", mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion), currTime.Format("2006/1/2"), mtmv.MessageType, fmt.Sprint(mtmv.MajorVersion), fmt.Sprint(currTime.Unix()))
+		uploadLocation := fmt.Sprintf("%s/%s/%s.gz", filePathPrefix, currTime.Format("2006/1/2"), fmt.Sprint(currTime.Unix()))
 		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {
 			return err
@@ -273,23 +294,23 @@ func (fp *Firehose) RunLeader(ctx context.Context) error {
 	currentTime := fp.Clock.Now()
 	timerCh := time.After(time.Duration(fp.processSettings.ScrapeInterval) * time.Second)
 	// go through all msgs and write to msgtype folder
+
 	for {
 		select {
 		case <-timerCh:
 			wg := &sync.WaitGroup{}
-			for mtmv := range fp.registry {
+			for _, filePrefix := range fp.filePrefixes {
 				wg.Add(1)
-				go func(mtmv hedwig.MessageTypeMajorVersion) {
+				go func(filePrefix string) {
 					defer wg.Done()
-					err := fp.moveFilesToOutputBucket(ctx, mtmv, currentTime)
+					err := fp.moveFilesToOutputBucket(ctx, filePrefix, currentTime)
 					// just logs errors but will retry on next run of leader
 					if err != nil {
 						fp.logger.Error(ctx, err, "moving files failed",
-							"messageType", mtmv.MessageType,
-							"messageVersion", fmt.Sprint(mtmv.MajorVersion),
+							"filePrefix", filePrefix,
 						)
 					}
-				}(mtmv)
+				}(filePrefix)
 			}
 			wg.Wait()
 			// restart scrape interval and run leader again
@@ -400,7 +421,7 @@ outer:
 	}
 }
 
-func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
+func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.EncoderDecoder, msgList []hedwig.MessageTypeMajorVersion, filePrefixes []string, mtfp MsgToFilePrefix, storageBackend StorageBackend, listenRequest hedwig.ListenRequest, consumerSettings gcp.Settings, processSettings ProcessSettings, logger hedwig.Logger) (*Firehose, error) {
 	registry := hedwig.CallbackRegistry{}
 
 	hedwigFirehose := hedwig.NewFirehose(encoderDecoder, encoderDecoder)
@@ -418,5 +439,7 @@ func NewFirehose(consumerBackend hedwig.ConsumerBackend, encoderDecoder hedwig.E
 	hedwigConsumer := hedwig.NewQueueConsumer(consumerBackend, encoderDecoder, logger, registry)
 	f.hedwigConsumer = hedwigConsumer
 	f.registry = registry
+	f.filePrefixes = filePrefixes
+	f.msgToFilePrefix = mtfp
 	return f, nil
 }

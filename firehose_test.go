@@ -28,8 +28,13 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func GetSubName(msg *hedwig.Message) (string, error) {
+	return msg.Metadata.ProviderMetadata.(gcp.Metadata).SubscriptionName, nil
+}
+
 type GcpTestSuite struct {
 	suite.Suite
+	filePrefixes   []string
 	storageClient  *storage.Client
 	server         *fakestorage.Server
 	pubSubSettings gcp.Settings
@@ -125,6 +130,7 @@ func (s *GcpTestSuite) SetupTest() {
 	s.server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "some-staging-bucket"})
 	s.server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "some-output-bucket"})
 	s.server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "some-metadata-bucket"})
+	s.filePrefixes = []string{"dev-myapp-dev-user-created-v1"}
 	s.storageClient = s.server.Client()
 	settings := gcp.Settings{
 		GoogleCloudProject: "emulator-project",
@@ -156,7 +162,7 @@ func (s *GcpTestSuite) TestNewFirehose() {
 		NumConcurrency:    2,
 	}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	assert.Equal(s.T(), nil, err)
 	assert.NotNil(s.T(), f)
 }
@@ -186,7 +192,7 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
-	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 
 	contextTimeout := time.Second * 1
@@ -211,6 +217,43 @@ func (s *GcpTestSuite) TestFollowerCtxDone() {
 	_, err = publisher.Publish(ctx, message)
 	s.Require().NoError(err)
 
+	_ = f.RunFollower(ctx)
+}
+
+func (s *GcpTestSuite) TestFollowerPanicBadMsgToFilePrefix() {
+	defer func() {
+		if r := recover(); r == nil {
+			s.T().Errorf("The code did not panic")
+		}
+	}()
+
+	badFunc := func(message *hedwig.Message) (string, error) {
+		return "not_a_file_prefix", nil
+	}
+
+	gcpSettings := gcp.Settings{}
+	var hedwigLogger hedwig.Logger
+	backend := gcp.NewBackend(gcpSettings, hedwigLogger)
+	msgList := []hedwig.MessageTypeMajorVersion{{
+		MessageType:  "user-created",
+		MajorVersion: 1,
+	}}
+	var s3 firehose.ProcessSettings
+	var s2 gcp.Settings
+	storageBackend := firehoseGcp.NewBackend(&storage.Client{})
+	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
+	lr := hedwig.ListenRequest{
+		NumMessages:       2,
+		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
+		NumConcurrency:    2,
+	}
+
+	contextTimeout := time.Second * 30
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+
+	defer cancel()
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, badFunc, storageBackend, lr, s2, s3, hedwigLogger)
+	s.Require().NoError(err)
 	_ = f.RunFollower(ctx)
 }
 
@@ -242,7 +285,7 @@ func (s *GcpTestSuite) TestFollowerPanic() {
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
 	defer cancel()
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	_ = f.RunFollower(ctx)
 }
@@ -277,7 +320,7 @@ func (s *GcpTestSuite) TestFirehoseDoesNotRunDeploymentDoesNotMatch() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	// set longer than global timeout
@@ -328,7 +371,7 @@ func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
 		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
-	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	// freeze time for test
 	parsed, _ := time.Parse("2006-01-02", "2022-10-15")
@@ -385,7 +428,7 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			attrs, err := s.storageClient.Bucket("some-staging-bucket").Object("user-created/1/2022/10/15/1665792000").Attrs(ctx)
+			attrs, err := s.storageClient.Bucket("some-staging-bucket").Object("dev-myapp-dev-user-created-v1/instance_1/2022/10/15/1665792000").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -412,7 +455,7 @@ outer:
 		}
 		s.Require().NoError(err)
 		// check that file under message folder
-		if attrs.Name == "user-created/1/2022/10/15/1665792000" {
+		if attrs.Name == "dev-myapp-dev-user-created-v1/instance_1/2022/10/15/1665792000" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.StorageBackend.CreateReader(context.Background(), "some-staging-bucket", attrs.Name)
 			defer r.Close()
@@ -476,7 +519,7 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 		VisibilityTimeout: firehose.DefaultVisibilityTimeoutS,
 		NumConcurrency:    2,
 	}
-	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().NoError(err)
 	// freeze time for test
 	parsed, _ := time.Parse("2006-01-02", "2022-10-16")
@@ -520,14 +563,14 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	s.server.CreateObject(fakestorage.Object{
 		ObjectAttrs: fakestorage.ObjectAttrs{
 			BucketName: "some-staging-bucket",
-			Name:       "user-created/1/2022/10/15/1665792000",
+			Name:       "dev-myapp-dev-user-created-v1/1/2022/10/15/1665792000",
 		},
 		Content: expected,
 	})
 	s.server.CreateObject(fakestorage.Object{
 		ObjectAttrs: fakestorage.ObjectAttrs{
 			BucketName: "some-staging-bucket",
-			Name:       "user-created/1/2022/10/15/1665792010",
+			Name:       "dev-myapp-dev-user-created-v1/1/2022/10/15/1665792010",
 		},
 		Content: expected2,
 	})
@@ -555,7 +598,7 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-output-bucket").Object("user-created/1/2022/10/16/user-created-1-1665878400.gz").Attrs(ctx)
+			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665878400.gz").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -574,7 +617,7 @@ outer:
 		}
 		s.Require().NoError(err)
 		// check that file under message folder
-		if attrs.Name == "user-created/1/2022/10/16/user-created-1-1665878400.gz" {
+		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/16/1665878400.gz" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			defer r.Close()
@@ -623,7 +666,7 @@ func (s *GcpTestSuite) TestIsLeaderFileBadFormat() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -661,7 +704,7 @@ func (s *GcpTestSuite) TestIsLeaderNoDeploymentId() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -689,7 +732,7 @@ func (s *GcpTestSuite) TestIsLeaderNoFile() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -743,7 +786,7 @@ func (s *GcpTestSuite) TestIsLeaderMatchingNode() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -785,7 +828,7 @@ func (s *GcpTestSuite) TestIsLeaderDeploymentDoesntMatch() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -827,7 +870,7 @@ func (s *GcpTestSuite) TestNotLeader() {
 	encoderDecoder := firehoseProtobuf.FirehoseEncoderDecoder{}
 	lr := hedwig.ListenRequest{}
 
-	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, storageBackend, lr, s2, s3, hedwigLogger)
+	f, err := firehose.NewFirehose(backend, &encoderDecoder, msgList, s.filePrefixes, GetSubName, storageBackend, lr, s2, s3, hedwigLogger)
 	s.Require().Nil(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
