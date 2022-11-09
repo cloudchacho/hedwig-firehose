@@ -229,10 +229,16 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 	}
 	// wait until message flushed into GCS file.
 	err := <-ch
+
 	if err != nil {
 		fp.logger.Error(ctx, err, "handleMessage Failed",
 			"messageType", message.Type,
 			"errString", err.Error(),
+		)
+	} else {
+		fp.logger.Debug(ctx, "Message Handled",
+			"MessageType", message.Type,
+			"MessageId", message.ID,
 		)
 	}
 	return err
@@ -412,11 +418,18 @@ outer:
 			break outer
 		}
 	}
+	nodeId := fp.StorageBackend.GetNodeId(ctx)
 	if leader {
 		// 2. if leader call RunLeader
+		fp.logger.Debug(ctx, "Starting Leader",
+			"NodeId", nodeId,
+		)
 		return fp.RunLeader(ctx)
 	} else {
 		// 3. else follower call RunFollower
+		fp.logger.Debug(ctx, "Starting Follower",
+			"NodeId", nodeId,
+		)
 		return fp.RunFollower(ctx)
 	}
 }
