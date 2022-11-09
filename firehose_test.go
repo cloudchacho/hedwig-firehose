@@ -347,7 +347,7 @@ func (s *GcpTestSuite) TestFirehoseInFollowerMode() {
 }
 
 func (s *GcpTestSuite) RunFirehoseFollowerIntegration() {
-	var hedwigLogger hedwig.Logger
+	hedwigLogger := hedwig.StdLogger{}
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
 	// maybe just user-created?
 	msgList := []hedwig.MessageTypeMajorVersion{{

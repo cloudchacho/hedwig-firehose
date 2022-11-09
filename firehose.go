@@ -418,16 +418,15 @@ outer:
 			break outer
 		}
 	}
+	nodeId := fp.StorageBackend.GetNodeId(ctx)
 	if leader {
 		// 2. if leader call RunLeader
-		nodeId := fp.StorageBackend.GetNodeId(ctx)
 		fp.logger.Debug(ctx, "Starting Leader",
 			"NodeId", nodeId,
 		)
 		return fp.RunLeader(ctx)
 	} else {
 		// 3. else follower call RunFollower
-		nodeId := fp.StorageBackend.GetNodeId(ctx)
 		fp.logger.Debug(ctx, "Starting Follower",
 			"NodeId", nodeId,
 		)
