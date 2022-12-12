@@ -284,7 +284,7 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 	if len(msgs) > 0 {
 		// sort by timestamp
 		sort.Sort(msgs)
-		filename := fmt.Sprintf("%d.gz", currTime.Unix())
+		filename := fmt.Sprint(currTime.Unix())
 		uploadLocation := fmt.Sprintf("%s/%s/%s", filePathPrefix, currTime.Format("2006/1/2"), filename)
 		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {

@@ -599,7 +599,7 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665878400.gz").Attrs(ctx)
+			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665878400").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -619,7 +619,7 @@ outer:
 		}
 		s.Require().NoError(err)
 		// check that file under message folder
-		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/16/1665878400.gz" {
+		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/16/1665878400" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			defer r.Close()
@@ -648,7 +648,7 @@ outer:
 			s.Require().NoError(err)
 			// Check just the start of the index entry; figuring out the timestamps isn't
 			// worth the trouble.
-			expected := "{\"name\":\"1665878400.gz\",\"min_timestamp\""
+			expected := "{\"name\":\"1665878400\",\"min_timestamp\""
 			assert.Equal(s.T(), string(res[:len(expected)]), expected)
 		}
 	}
