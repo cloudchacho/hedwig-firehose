@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"sync"
@@ -610,6 +611,7 @@ outer:
 
 	it := s.storageClient.Bucket("some-output-bucket").Objects(context.Background(), nil)
 	userCreatedObjs := []string{}
+	foundIndex := false
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
@@ -636,8 +638,22 @@ outer:
 			}
 			assert.Equal(s.T(), foundMetaData, map[string]int{"bar": 1, "bar2": 1})
 		}
+
+		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/16/_metadata.ndjson" {
+			foundIndex = true
+			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
+			defer r.Close()
+			s.Require().NoError(err)
+			res, err := io.ReadAll(r)
+			s.Require().NoError(err)
+			// Check just the start of the index entry; figuring out the timestamps isn't
+			// worth the trouble.
+			expected := "{\"name\":\"1665878400.gz\",\"min_timestamp\""
+			assert.Equal(s.T(), string(res[:len(expected)]), expected)
+		}
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
+	assert.True(s.T(), foundIndex)
 	cancel()
 }
 
