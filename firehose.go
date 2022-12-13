@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
 )
@@ -335,13 +336,14 @@ func (fp *Firehose) writeIndex(ctx context.Context, filePathPrefix string, currT
 	// there are a max of 288 entries per index file, so it isn't too big.
 	index, err := fp.StorageBackend.CreateReader(ctx, fp.processSettings.OutputBucket, indexLocation)
 	var indexContents []byte
-	// If there's an error opening the index, treat it as though it was empty. (Most likely, it didn't exist)
 	if err == nil {
 		defer index.Close()
 		indexContents, err = io.ReadAll(index)
 		if err != nil {
 			return err
 		}
+	} else if err != storage.ErrObjectNotExist {
+		return err
 	}
 
 	indexWriter, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, indexLocation)
