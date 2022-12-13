@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -494,6 +495,21 @@ func (s *GcpTestSuite) TestFirehoseInLeaderMode() {
 	assert.Equal(s.T(), err.Error(), "object not found")
 }
 
+func (s *GcpTestSuite) userCreatedMessage(f *firehose.Firehose, userId string, foo string) []byte {
+	data := firehose.UserCreatedV1{UserId: &userId}
+	mData, err := proto.Marshal(&data)
+	s.Require().NoError(err)
+	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": foo}, mData, "myapp")
+	s.Require().NoError(err)
+	sm, err := f.HedwigFirehose.Serialize(message)
+	s.Require().NoError(err)
+	smL := len(sm)
+
+	expMsgLength := new(bytes.Buffer)
+	_ = binary.Write(expMsgLength, binary.LittleEndian, smL)
+	return append(expMsgLength.Bytes(), sm...)
+}
+
 func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	hedwigLogger := hedwig.StdLogger{}
 	backend := gcp.NewBackend(s.pubSubSettings, hedwigLogger)
@@ -532,34 +548,17 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	defer cancel()
 
 	userId := "C_1234567890123456"
-	data := firehose.UserCreatedV1{UserId: &userId}
-	mData, err := proto.Marshal(&data)
-	s.Require().NoError(err)
-	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar"}, mData, "myapp")
-	s.Require().NoError(err)
+	expected := s.userCreatedMessage(f, userId, "bar")
 
-	userId2 := "C_9012345678901234"
-	data2 := firehose.UserCreatedV1{UserId: &userId2}
-	mData2, err := proto.Marshal(&data2)
-	s.Require().NoError(err)
 	// sleep for 1 sec to get timestamp 1 second later
 	<-time.After(time.Second * 1)
-	message2, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": "bar2"}, mData2, "myapp")
-	s.Require().NoError(err)
-	sm, err := f.HedwigFirehose.Serialize(message)
-	s.Require().NoError(err)
-	sm2, err := f.HedwigFirehose.Serialize(message2)
-	s.Require().NoError(err)
-	smL := len(sm)
-	sm2L := len(sm2)
+	userId2 := "C_9012345678901234"
+	expected2 := s.userCreatedMessage(f, userId2, "bar2")
 
-	expMsgLength := new(bytes.Buffer)
-	_ = binary.Write(expMsgLength, binary.LittleEndian, smL)
-	expected := append(expMsgLength.Bytes(), sm...)
-
-	expMsgLength2 := new(bytes.Buffer)
-	_ = binary.Write(expMsgLength2, binary.LittleEndian, sm2L)
-	expected2 := append(expMsgLength2.Bytes(), sm2...)
+	// sleep for 1 sec to get timestamp 1 second later
+	<-time.After(time.Second * 1)
+	userId3 := "C_0123456789012345"
+	expected3 := s.userCreatedMessage(f, userId3, "baz")
 
 	s.server.CreateObject(fakestorage.Object{
 		ObjectAttrs: fakestorage.ObjectAttrs{
@@ -590,6 +589,42 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 		assert.NotNil(s.T(), err)
 	}()
 
+	// Once the firehose has processed the existing staging files, give it a new one to process.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+	outer:
+		for {
+			select {
+			case <-ctx.Done():
+				fmt.Println("ctx timeout")
+				s.T().FailNow()
+			default:
+				// poll for file every 2 seconds
+				<-time.After(time.Second * 2)
+				_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665878400").Attrs(ctx)
+				if err == storage.ErrObjectNotExist {
+					continue
+				}
+
+				// Update the firehose's clock and add another message
+				parsed, _ := time.Parse("2006-01-02 15:04", "2022-10-16 00:10")
+				f.Clock.Change(parsed)
+				// Wait at least one scrape interval for the firehose to re-read the clock
+				<-time.After(time.Second * 2)
+
+				s.server.CreateObject(fakestorage.Object{
+					ObjectAttrs: fakestorage.ObjectAttrs{
+						BucketName: "some-staging-bucket",
+						Name:       "dev-myapp-dev-user-created-v1/1/2022/10/15/1665792020",
+					},
+					Content: expected3,
+				})
+				break outer
+			}
+		}
+	}()
+
 outer:
 	for {
 		select {
@@ -599,7 +634,7 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665878400").Attrs(ctx)
+			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665879000").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -646,10 +681,14 @@ outer:
 			s.Require().NoError(err)
 			res, err := io.ReadAll(r)
 			s.Require().NoError(err)
+			lines := strings.Split(string(res[:]), "\n")
 			// Check just the start of the index entry; figuring out the timestamps isn't
 			// worth the trouble.
-			expected := "{\"name\":\"1665878400\",\"min_timestamp\""
-			assert.Equal(s.T(), string(res[:len(expected)]), expected)
+			expected0 := "{\"name\":\"1665878400\",\"min_timestamp\""
+			expected1 := "{\"name\":\"1665879000\",\"min_timestamp\""
+			assert.Equal(s.T(), lines[0][:len(expected0)], expected0)
+			assert.Equal(s.T(), lines[1][:len(expected1)], expected1)
+			assert.Equal(s.T(), len(lines), 3) // 3, because of the empty line at the end
 		}
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))

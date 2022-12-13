@@ -110,14 +110,28 @@ type StorageBackend interface {
 }
 
 type Clock struct {
+	// If non-nil this is a synthetic time for testing
 	Instant time.Time
+	// A lock protecting the synthetic time, so that one thread can update the clock
+	// while firehose is running. It's only used when Instant is non-nil, so it's safe
+	// to update a non-nil Instant to another non-nil Instant but it's a race to
+	// update a nil Instant to a non-nil Instant while firehose is running.
+	mu sync.Mutex
 }
 
 func (this *Clock) Now() time.Time {
 	if this == nil {
 		return time.Now()
 	}
+	this.mu.Lock()
+	defer this.mu.Unlock()
 	return this.Instant
+}
+
+func (this *Clock) Change(time time.Time) {
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	this.Instant = time
 }
 
 type Firehose struct {
