@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"sort"
 	"sync"
 	"time"
 
+	"cloud.google.com/go/storage"
 	"github.com/cloudchacho/hedwig-go"
 	"github.com/cloudchacho/hedwig-go/gcp"
 )
@@ -77,6 +79,12 @@ func (e LeaderFileExists) Error() string {
 	return "Leader file already exists"
 }
 
+type indexFile struct {
+	Name         string `json:"name"`
+	MinTimestamp int64  `json:"min_timestamp"`
+	MaxTimestamp int64  `json:"max_timestamp"`
+}
+
 // StorageBackend is used for interacting with storage
 type StorageBackend interface {
 	// CreateWriter returns a writer for specified uploadlocation
@@ -102,14 +110,28 @@ type StorageBackend interface {
 }
 
 type Clock struct {
+	// If non-nil this is a synthetic time for testing
 	Instant time.Time
+	// A lock protecting the synthetic time, so that one thread can update the clock
+	// while firehose is running. It's only used when Instant is non-nil, so it's safe
+	// to update a non-nil Instant to another non-nil Instant but it's a race to
+	// update a nil Instant to a non-nil Instant while firehose is running.
+	mu sync.Mutex
 }
 
 func (this *Clock) Now() time.Time {
 	if this == nil {
 		return time.Now()
 	}
+	this.mu.Lock()
+	defer this.mu.Unlock()
 	return this.Instant
+}
+
+func (this *Clock) Change(time time.Time) {
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	this.Instant = time
 }
 
 type Firehose struct {
@@ -251,6 +273,8 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 		return err
 	}
 	var msgs byTimestamp
+	var minTimestamp int64 = math.MaxInt64
+	var maxTimestamp int64 = math.MinInt64
 	for _, fileName := range fileNames {
 		r, err := fp.StorageBackend.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
 		defer r.Close()
@@ -263,12 +287,20 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 		}
 		for _, r := range res {
 			msgs = append(msgs, &r)
+			t := r.Metadata.Timestamp.Unix()
+			if t < minTimestamp {
+				minTimestamp = t
+			}
+			if t > maxTimestamp {
+				maxTimestamp = t
+			}
 		}
 	}
 	if len(msgs) > 0 {
 		// sort by timestamp
 		sort.Sort(msgs)
-		uploadLocation := fmt.Sprintf("%s/%s/%s.gz", filePathPrefix, currTime.Format("2006/1/2"), fmt.Sprint(currTime.Unix()))
+		filename := fmt.Sprint(currTime.Unix())
+		uploadLocation := fmt.Sprintf("%s/%s/%s", filePathPrefix, currTime.Format("2006/1/2"), filename)
 		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {
 			return err
@@ -292,7 +324,59 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 			// ignore errors when deleting, picked up again on next run
 			_ = fp.StorageBackend.DeleteFile(ctx, fp.processSettings.StagingBucket, fileName)
 		}
+
+		err = fp.writeIndex(ctx, filePathPrefix, currTime, filename, minTimestamp, maxTimestamp)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// maintain an index file (one for every output directory) listing all the data files and their timestamp range
+func (fp *Firehose) writeIndex(ctx context.Context, filePathPrefix string, currTime time.Time, name string, minTimestamp int64, maxTimestamp int64) error {
+	indexEntry, err := json.Marshal(indexFile{
+		Name:         name,
+		MinTimestamp: minTimestamp,
+		MaxTimestamp: maxTimestamp,
+	})
+	indexEntry = append(indexEntry, '\n')
+	if err != nil {
+		return err
+	}
+	indexLocation := fmt.Sprintf("%s/%s/_metadata.ndjson", filePathPrefix, currTime.Format("2006/1/2"))
+	// GCS objects are immutable: we cannot append to the index. So we read the old index,
+	// append a line, and write a new one. At 5 minutes per entry and a new index file per day,
+	// there are a max of 288 entries per index file, so it isn't too big.
+	index, err := fp.StorageBackend.CreateReader(ctx, fp.processSettings.OutputBucket, indexLocation)
+	var indexContents []byte
+	if err == nil {
+		defer index.Close()
+		indexContents, err = io.ReadAll(index)
+		if err != nil {
+			return err
+		}
+	} else if err != storage.ErrObjectNotExist {
+		return err
+	}
+
+	indexWriter, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, indexLocation)
+	if err != nil {
+		return err
+	}
+	_, err = indexWriter.Write(indexContents)
+	if err != nil {
+		return err
+	}
+	_, err = indexWriter.Write(indexEntry)
+	if err != nil {
+		return err
+	}
+	err = indexWriter.Close()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
