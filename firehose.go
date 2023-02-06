@@ -265,7 +265,7 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 	return err
 }
 
-func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix string) error {
+func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix string, currTime time.Time) error {
 	// read from staging
 	inputFileNames, err := fp.StorageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
 	if err != nil {
@@ -291,15 +291,16 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 		// sort by timestamp
 		sort.Sort(msgs)
 		minTimestamp := msgs[0].Metadata.Timestamp
+		maxTimestamp := msgs[len(msgs)-1].Metadata.Timestamp
 
-		newestMsg := msgs[len(msgs)-1]
-		maxTimestamp := newestMsg.Metadata.Timestamp
+		// File name is based on when the file was processed (current timestamp) to ensure uniqueness
+		outputFileName := fmt.Sprint(currTime.Unix())
 
-		// Add message ID to file name to ensure uniqueness even if we encounter
-		// multiple messages with the exact same timestamp across scrapes
-		outputFileName := fmt.Sprintf("%d_%s", maxTimestamp.UnixMilli(), newestMsg.ID)
-
+		// File path is based on the timestamp of the latest message in the batch,
+		// to ensure files are found under the expected date even if the consumer
+		// is lagging behind
 		uploadLocation := fmt.Sprintf("%s/%s/%s", filePathPrefix, maxTimestamp.Format("2006/1/2"), outputFileName)
+
 		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {
 			return err
@@ -398,7 +399,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) error {
 				wg.Add(1)
 				go func(filePrefix string) {
 					defer wg.Done()
-					err := fp.moveFilesToOutputBucket(ctx, filePrefix)
+					err := fp.moveFilesToOutputBucket(ctx, filePrefix, currentTime)
 					// just logs errors but will retry on next run of leader
 					if err != nil {
 						fp.logger.Error(ctx, err, "moving files failed",
