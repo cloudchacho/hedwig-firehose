@@ -558,20 +558,17 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 
 	// Set message timestamps to be 2022/10/15 (a day before the time we set above)
 	userId := "C_1234567890123456"
-	msg1Time := time.Date(2022, time.Month(10), 15, 0, 0, 0, 0, time.UTC)
-	msg1 := s.userCreatedMessage(f, userId, "bar", msg1Time)
+	msg1 := s.userCreatedMessage(f, userId, "bar", time.Date(2022, time.Month(10), 15, 0, 0, 0, 0, time.UTC))
 	expected1 := s.serialize(f, msg1)
 
 	// Next message sent 10 seconds later
 	userId2 := "C_9012345678901234"
-	msg2Time := time.Date(2022, time.Month(10), 15, 0, 0, 10, 0, time.UTC)
-	msg2 := s.userCreatedMessage(f, userId2, "bar2", msg2Time)
+	msg2 := s.userCreatedMessage(f, userId2, "bar2", time.Date(2022, time.Month(10), 15, 0, 0, 10, 0, time.UTC))
 	expected2 := s.serialize(f, msg2)
 
 	// Next message sent another 10 seconds later
 	userId3 := "C_0123456789012345"
-	msg3Time := time.Date(2022, time.Month(10), 15, 0, 0, 20, 0, time.UTC)
-	msg3 := s.userCreatedMessage(f, userId3, "bar3", msg3Time)
+	msg3 := s.userCreatedMessage(f, userId3, "bar3", time.Date(2022, time.Month(10), 15, 0, 0, 20, 0, time.UTC))
 	expected3 := s.serialize(f, msg3)
 
 	s.server.CreateObject(fakestorage.Object{
@@ -706,16 +703,16 @@ outer:
 			json.Unmarshal([]byte(lines[0]), &actual0)
 			assert.Equal(s.T(), actual0, indexFile{
 				Name:         "1665878400",
-				MinTimestamp: msg1Time.Unix(),
-				MaxTimestamp: msg2Time.Unix(),
+				MinTimestamp: msg1.Metadata.Timestamp.Unix(),
+				MaxTimestamp: msg2.Metadata.Timestamp.Unix(),
 			})
 
 			actual1 := indexFile{}
 			json.Unmarshal([]byte(lines[1]), &actual1)
 			assert.Equal(s.T(), actual1, indexFile{
 				Name:         "1665879000",
-				MinTimestamp: msg3Time.Unix(),
-				MaxTimestamp: msg3Time.Unix(),
+				MinTimestamp: msg3.Metadata.Timestamp.Unix(),
+				MaxTimestamp: msg3.Metadata.Timestamp.Unix(),
 			})
 
 			assert.Equal(s.T(), len(lines), 3) // 3, because of the empty line at the end
