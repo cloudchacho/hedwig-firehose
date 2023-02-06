@@ -286,13 +286,19 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 			msgs = append(msgs, &r)
 		}
 	}
+
 	if len(msgs) > 0 {
 		// sort by timestamp
 		sort.Sort(msgs)
 		minTimestamp := msgs[0].Metadata.Timestamp
-		maxTimestamp := msgs[len(msgs)-1].Metadata.Timestamp
 
-		outputFileName := fmt.Sprint(maxTimestamp.UnixMilli())
+		newestMsg := msgs[len(msgs)-1]
+		maxTimestamp := newestMsg.Metadata.Timestamp
+
+		// Add message ID to file name to ensure uniqueness even if we encounter
+		// multiple messages with the exact same timestamp across scrapes
+		outputFileName := fmt.Sprintf("%d_%s", maxTimestamp.UnixMilli(), newestMsg.ID)
+
 		uploadLocation := fmt.Sprintf("%s/%s/%s", filePathPrefix, maxTimestamp.Format("2006/1/2"), outputFileName)
 		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {
