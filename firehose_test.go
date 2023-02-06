@@ -495,19 +495,28 @@ func (s *GcpTestSuite) TestFirehoseInLeaderMode() {
 	assert.Equal(s.T(), err.Error(), "object not found")
 }
 
-func (s *GcpTestSuite) userCreatedMessage(f *firehose.Firehose, userId string, foo string) []byte {
+func (s *GcpTestSuite) userCreatedMessage(
+	f *firehose.Firehose,
+	userId string,
+	foo string,
+	timestamp time.Time,
+) *hedwig.Message {
 	data := firehose.UserCreatedV1{UserId: &userId}
 	mData, err := proto.Marshal(&data)
 	s.Require().NoError(err)
 	message, err := hedwig.NewMessage("user-created", "1.0", map[string]string{"foo": foo}, mData, "myapp")
 	s.Require().NoError(err)
-	sm, err := f.HedwigFirehose.Serialize(message)
-	s.Require().NoError(err)
-	smL := len(sm)
+	message.Metadata.Timestamp = timestamp
 
+	return message
+}
+
+func (s *GcpTestSuite) serialize(f *firehose.Firehose, message *hedwig.Message) []byte {
+	serialized, err := f.HedwigFirehose.Serialize(message)
+	s.Require().NoError(err)
 	expMsgLength := new(bytes.Buffer)
-	_ = binary.Write(expMsgLength, binary.LittleEndian, smL)
-	return append(expMsgLength.Bytes(), sm...)
+	_ = binary.Write(expMsgLength, binary.LittleEndian, len(serialized))
+	return append(expMsgLength.Bytes(), serialized...)
 }
 
 func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
@@ -547,25 +556,30 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 
 	defer cancel()
 
+	// Set message timestamps to be 2022/10/15 (a day before the time we set above)
 	userId := "C_1234567890123456"
-	expected := s.userCreatedMessage(f, userId, "bar")
+	msg1Time := time.Date(2022, time.Month(10), 15, 0, 0, 0, 0, time.UTC)
+	msg1 := s.userCreatedMessage(f, userId, "bar", msg1Time)
+	expected1 := s.serialize(f, msg1)
 
-	// sleep for 1 sec to get timestamp 1 second later
-	<-time.After(time.Second * 1)
+	// Next message sent 10 seconds later
 	userId2 := "C_9012345678901234"
-	expected2 := s.userCreatedMessage(f, userId2, "bar2")
+	msg2Time := time.Date(2022, time.Month(10), 15, 0, 0, 10, 0, time.UTC)
+	msg2 := s.userCreatedMessage(f, userId2, "bar2", msg2Time)
+	expected2 := s.serialize(f, msg2)
 
-	// sleep for 1 sec to get timestamp 1 second later
-	<-time.After(time.Second * 1)
+	// Next message sent another 10 seconds later
 	userId3 := "C_0123456789012345"
-	expected3 := s.userCreatedMessage(f, userId3, "baz")
+	msg3Time := time.Date(2022, time.Month(10), 15, 0, 0, 20, 0, time.UTC)
+	msg3 := s.userCreatedMessage(f, userId3, "bar3", msg3Time)
+	expected3 := s.serialize(f, msg3)
 
 	s.server.CreateObject(fakestorage.Object{
 		ObjectAttrs: fakestorage.ObjectAttrs{
 			BucketName: "some-staging-bucket",
 			Name:       "dev-myapp-dev-user-created-v1/1/2022/10/15/1665792000",
 		},
-		Content: expected,
+		Content: expected1,
 	})
 	s.server.CreateObject(fakestorage.Object{
 		ObjectAttrs: fakestorage.ObjectAttrs{
@@ -593,6 +607,7 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+
 	outer:
 		for {
 			select {
@@ -602,7 +617,10 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 			default:
 				// poll for file every 2 seconds
 				<-time.After(time.Second * 2)
-				_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665878400").Attrs(ctx)
+
+				// Note that even though "now" is 2022/10/16, the object path is based
+				// on the timestamp in the message itself (2022/10/15)
+				_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/15/1665878400").Attrs(ctx)
 				if err == storage.ErrObjectNotExist {
 					continue
 				}
@@ -634,7 +652,7 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/16/1665879000").Attrs(ctx)
+			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/15/1665879000").Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -654,7 +672,7 @@ outer:
 		}
 		s.Require().NoError(err)
 		// check that file under message folder
-		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/16/1665878400" {
+		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/15/1665878400" {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			defer r.Close()
@@ -674,7 +692,7 @@ outer:
 			assert.Equal(s.T(), foundMetaData, map[string]int{"bar": 1, "bar2": 1})
 		}
 
-		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/16/_metadata.ndjson" {
+		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/15/_metadata.ndjson" {
 			foundIndex = true
 			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			defer r.Close()
@@ -682,18 +700,36 @@ outer:
 			res, err := io.ReadAll(r)
 			s.Require().NoError(err)
 			lines := strings.Split(string(res[:]), "\n")
-			// Check just the start of the index entry; figuring out the timestamps isn't
-			// worth the trouble.
-			expected0 := "{\"name\":\"1665878400\",\"min_timestamp\""
-			expected1 := "{\"name\":\"1665879000\",\"min_timestamp\""
-			assert.Equal(s.T(), lines[0][:len(expected0)], expected0)
-			assert.Equal(s.T(), lines[1][:len(expected1)], expected1)
+
+			// Check each line of the index file
+			actual0 := indexFile{}
+			json.Unmarshal([]byte(lines[0]), &actual0)
+			assert.Equal(s.T(), actual0, indexFile{
+				Name:         "1665878400",
+				MinTimestamp: msg1Time.Unix(),
+				MaxTimestamp: msg2Time.Unix(),
+			})
+
+			actual1 := indexFile{}
+			json.Unmarshal([]byte(lines[1]), &actual1)
+			assert.Equal(s.T(), actual1, indexFile{
+				Name:         "1665879000",
+				MinTimestamp: msg3Time.Unix(),
+				MaxTimestamp: msg3Time.Unix(),
+			})
+
 			assert.Equal(s.T(), len(lines), 3) // 3, because of the empty line at the end
 		}
 	}
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
 	assert.True(s.T(), foundIndex)
 	cancel()
+}
+
+type indexFile struct {
+	Name         string `json:"name"`
+	MinTimestamp int64  `json:"min_timestamp"`
+	MaxTimestamp int64  `json:"max_timestamp"`
 }
 
 func (s *GcpTestSuite) TestIsLeaderFileBadFormat() {
