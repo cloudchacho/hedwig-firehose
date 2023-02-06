@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"sort"
 	"sync"
 	"time"
@@ -64,7 +63,7 @@ func (t byTimestamp) Swap(i, j int) {
 	t[i], t[j] = t[j], t[i]
 }
 func (t byTimestamp) Less(i, j int) bool {
-	return t[i].Metadata.Timestamp.Unix() < t[j].Metadata.Timestamp.Unix()
+	return t[i].Metadata.Timestamp.Before(t[j].Metadata.Timestamp)
 }
 
 type leaderFile struct {
@@ -266,16 +265,14 @@ func (fp *Firehose) handleMessage(ctx context.Context, message *hedwig.Message) 
 	return err
 }
 
-func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix string, currTime time.Time) error {
+func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix string) error {
 	// read from staging
-	fileNames, err := fp.StorageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
+	inputFileNames, err := fp.StorageBackend.ListFilesPrefix(ctx, fp.processSettings.StagingBucket, filePathPrefix)
 	if err != nil {
 		return err
 	}
 	var msgs byTimestamp
-	var minTimestamp int64 = math.MaxInt64
-	var maxTimestamp int64 = math.MinInt64
-	for _, fileName := range fileNames {
+	for _, fileName := range inputFileNames {
 		r, err := fp.StorageBackend.CreateReader(ctx, fp.processSettings.StagingBucket, fileName)
 		defer r.Close()
 		if err != nil {
@@ -287,20 +284,16 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 		}
 		for _, r := range res {
 			msgs = append(msgs, &r)
-			t := r.Metadata.Timestamp.Unix()
-			if t < minTimestamp {
-				minTimestamp = t
-			}
-			if t > maxTimestamp {
-				maxTimestamp = t
-			}
 		}
 	}
 	if len(msgs) > 0 {
 		// sort by timestamp
 		sort.Sort(msgs)
-		filename := fmt.Sprint(currTime.Unix())
-		uploadLocation := fmt.Sprintf("%s/%s/%s", filePathPrefix, currTime.Format("2006/1/2"), filename)
+		minTimestamp := msgs[0].Metadata.Timestamp
+		maxTimestamp := msgs[len(msgs)-1].Metadata.Timestamp
+
+		outputFileName := fmt.Sprint(maxTimestamp.UnixMilli())
+		uploadLocation := fmt.Sprintf("%s/%s/%s", filePathPrefix, maxTimestamp.Format("2006/1/2"), outputFileName)
 		r, err := fp.StorageBackend.CreateWriter(ctx, fp.processSettings.OutputBucket, uploadLocation)
 		if err != nil {
 			return err
@@ -320,12 +313,12 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 			return err
 		}
 		// delete files when written to final output path
-		for _, fileName := range fileNames {
+		for _, inputFileName := range inputFileNames {
 			// ignore errors when deleting, picked up again on next run
-			_ = fp.StorageBackend.DeleteFile(ctx, fp.processSettings.StagingBucket, fileName)
+			_ = fp.StorageBackend.DeleteFile(ctx, fp.processSettings.StagingBucket, inputFileName)
 		}
 
-		err = fp.writeIndex(ctx, filePathPrefix, currTime, filename, minTimestamp, maxTimestamp)
+		err = fp.writeIndex(ctx, filePathPrefix, outputFileName, minTimestamp, maxTimestamp)
 		if err != nil {
 			return err
 		}
@@ -334,17 +327,23 @@ func (fp *Firehose) moveFilesToOutputBucket(ctx context.Context, filePathPrefix 
 }
 
 // maintain an index file (one for every output directory) listing all the data files and their timestamp range
-func (fp *Firehose) writeIndex(ctx context.Context, filePathPrefix string, currTime time.Time, name string, minTimestamp int64, maxTimestamp int64) error {
+func (fp *Firehose) writeIndex(
+	ctx context.Context,
+	filePathPrefix string,
+	name string,
+	minTimestamp time.Time,
+	maxTimestamp time.Time,
+) error {
 	indexEntry, err := json.Marshal(indexFile{
 		Name:         name,
-		MinTimestamp: minTimestamp,
-		MaxTimestamp: maxTimestamp,
+		MinTimestamp: minTimestamp.Unix(),
+		MaxTimestamp: maxTimestamp.Unix(),
 	})
 	indexEntry = append(indexEntry, '\n')
 	if err != nil {
 		return err
 	}
-	indexLocation := fmt.Sprintf("%s/%s/_metadata.ndjson", filePathPrefix, currTime.Format("2006/1/2"))
+	indexLocation := fmt.Sprintf("%s/%s/_metadata.ndjson", filePathPrefix, maxTimestamp.Format("2006/1/2"))
 	// GCS objects are immutable: we cannot append to the index. So we read the old index,
 	// append a line, and write a new one. At 5 minutes per entry and a new index file per day,
 	// there are a max of 288 entries per index file, so it isn't too big.
@@ -393,7 +392,7 @@ func (fp *Firehose) RunLeader(ctx context.Context) error {
 				wg.Add(1)
 				go func(filePrefix string) {
 					defer wg.Done()
-					err := fp.moveFilesToOutputBucket(ctx, filePrefix, currentTime)
+					err := fp.moveFilesToOutputBucket(ctx, filePrefix)
 					// just logs errors but will retry on next run of leader
 					if err != nil {
 						fp.logger.Error(ctx, err, "moving files failed",
