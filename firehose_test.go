@@ -617,7 +617,8 @@ func (s *GcpTestSuite) RunFirehoseLeaderIntegration() {
 
 				// Note that even though "now" is 2022/10/16, the object path is based
 				// on the timestamp in the message itself (2022/10/15)
-				_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/15/1665878400").Attrs(ctx)
+				expectedPath := fmt.Sprintf("dev-myapp-dev-user-created-v1/2022/10/15/%d_%s", msg2.Metadata.Timestamp.Unix(), msg2.ID)
+				_, err := s.storageClient.Bucket("some-output-bucket").Object(expectedPath).Attrs(ctx)
 				if err == storage.ErrObjectNotExist {
 					continue
 				}
@@ -649,7 +650,8 @@ outer:
 		default:
 			// poll for file every 2 seconds
 			<-time.After(time.Second * 2)
-			_, err := s.storageClient.Bucket("some-output-bucket").Object("dev-myapp-dev-user-created-v1/2022/10/15/1665879000").Attrs(ctx)
+			expectedPath := fmt.Sprintf("dev-myapp-dev-user-created-v1/2022/10/15/%d_%s", msg3.Metadata.Timestamp.Unix(), msg3.ID)
+			_, err := s.storageClient.Bucket("some-output-bucket").Object(expectedPath).Attrs(ctx)
 			if err == storage.ErrObjectNotExist {
 				continue
 			}
@@ -668,8 +670,10 @@ outer:
 			break
 		}
 		s.Require().NoError(err)
-		// check that file under message folder
-		if attrs.Name == "dev-myapp-dev-user-created-v1/2022/10/15/1665878400" {
+
+		// check the contents of the first output file, which should contain `msg1` and `msg2`
+		expectedPath := fmt.Sprintf("dev-myapp-dev-user-created-v1/2022/10/15/%d_%s", msg2.Metadata.Timestamp.Unix(), msg2.ID)
+		if attrs.Name == expectedPath {
 			userCreatedObjs = append(userCreatedObjs, attrs.Name)
 			r, err := f.StorageBackend.CreateReader(ctx, "some-output-bucket", attrs.Name)
 			defer r.Close()
@@ -702,7 +706,7 @@ outer:
 			actual0 := indexFile{}
 			json.Unmarshal([]byte(lines[0]), &actual0)
 			assert.Equal(s.T(), actual0, indexFile{
-				Name:         "1665878400",
+				Name:         fmt.Sprintf("%d_%s", msg2.Metadata.Timestamp.Unix(), msg2.ID),
 				MinTimestamp: msg1.Metadata.Timestamp.Unix(),
 				MaxTimestamp: msg2.Metadata.Timestamp.Unix(),
 			})
@@ -710,7 +714,7 @@ outer:
 			actual1 := indexFile{}
 			json.Unmarshal([]byte(lines[1]), &actual1)
 			assert.Equal(s.T(), actual1, indexFile{
-				Name:         "1665879000",
+				Name:         fmt.Sprintf("%d_%s", msg3.Metadata.Timestamp.Unix(), msg3.ID),
 				MinTimestamp: msg3.Metadata.Timestamp.Unix(),
 				MaxTimestamp: msg3.Metadata.Timestamp.Unix(),
 			})
