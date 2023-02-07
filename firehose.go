@@ -78,7 +78,7 @@ func (e LeaderFileExists) Error() string {
 	return "Leader file already exists"
 }
 
-type indexFile struct {
+type IndexFile struct {
 	Name         string `json:"name"`
 	MinTimestamp int64  `json:"min_timestamp"`
 	MaxTimestamp int64  `json:"max_timestamp"`
@@ -342,7 +342,7 @@ func (fp *Firehose) writeIndex(
 	minTimestamp time.Time,
 	maxTimestamp time.Time,
 ) error {
-	indexEntry, err := json.Marshal(indexFile{
+	indexEntry, err := json.Marshal(IndexFile{
 		Name:         name,
 		MinTimestamp: minTimestamp.Unix(),
 		MaxTimestamp: maxTimestamp.Unix(),

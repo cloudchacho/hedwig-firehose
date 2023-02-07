@@ -703,17 +703,17 @@ outer:
 			lines := strings.Split(string(res[:]), "\n")
 
 			// Check each line of the index file
-			actual0 := indexFile{}
+			actual0 := firehose.IndexFile{}
 			json.Unmarshal([]byte(lines[0]), &actual0)
-			assert.Equal(s.T(), actual0, indexFile{
+			assert.Equal(s.T(), actual0, firehose.IndexFile{
 				Name:         fmt.Sprintf("%d_%s", msg2.Metadata.Timestamp.Unix(), msg2.ID),
 				MinTimestamp: msg1.Metadata.Timestamp.Unix(),
 				MaxTimestamp: msg2.Metadata.Timestamp.Unix(),
 			})
 
-			actual1 := indexFile{}
+			actual1 := firehose.IndexFile{}
 			json.Unmarshal([]byte(lines[1]), &actual1)
-			assert.Equal(s.T(), actual1, indexFile{
+			assert.Equal(s.T(), actual1, firehose.IndexFile{
 				Name:         fmt.Sprintf("%d_%s", msg3.Metadata.Timestamp.Unix(), msg3.ID),
 				MinTimestamp: msg3.Metadata.Timestamp.Unix(),
 				MaxTimestamp: msg3.Metadata.Timestamp.Unix(),
@@ -725,12 +725,6 @@ outer:
 	assert.Equal(s.T(), 1, len(userCreatedObjs))
 	assert.True(s.T(), foundIndex)
 	cancel()
-}
-
-type indexFile struct {
-	Name         string `json:"name"`
-	MinTimestamp int64  `json:"min_timestamp"`
-	MaxTimestamp int64  `json:"max_timestamp"`
 }
 
 func (s *GcpTestSuite) TestIsLeaderFileBadFormat() {
