@@ -704,7 +704,8 @@ outer:
 
 			// Check each line of the index file
 			actual0 := firehose.IndexFile{}
-			json.Unmarshal([]byte(lines[0]), &actual0)
+			err = json.Unmarshal([]byte(lines[0]), &actual0)
+			s.Require().Nil(err)
 			assert.Equal(s.T(), actual0, firehose.IndexFile{
 				Name:         fmt.Sprintf("%d_%s", msg2.Metadata.Timestamp.Unix(), msg2.ID),
 				MinTimestamp: msg1.Metadata.Timestamp.Unix(),
@@ -712,7 +713,8 @@ outer:
 			})
 
 			actual1 := firehose.IndexFile{}
-			json.Unmarshal([]byte(lines[1]), &actual1)
+			err = json.Unmarshal([]byte(lines[1]), &actual1)
+			s.Require().Nil(err)
 			assert.Equal(s.T(), actual1, firehose.IndexFile{
 				Name:         fmt.Sprintf("%d_%s", msg3.Metadata.Timestamp.Unix(), msg3.ID),
 				MinTimestamp: msg3.Metadata.Timestamp.Unix(),
